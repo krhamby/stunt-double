@@ -1,4 +1,1 @@
 .parcel-cache/
-# Parcel finds the project root by the nearest lockfile or .git: inside this monorepo, `npm install` here
-# (which writes this lockfile) keeps it in this directory. Not committed: it pins local tarball integrity.
-package-lock.json
