@@ -4,11 +4,6 @@
   "exclude": ["dist"],
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "react",
-
-    /* stunt-double: types follow the generated shims, even inside node_modules/@acme/core */
-    "paths": { "@acme/core-slots/*": ["./sdk-slots/gen/*"] }
-  },
-  /* stunt-double: a missing generated check file is TS6053, never "silently unchecked" */
-  "files": ["src/stunt-double.check.ts"]
+    "jsxImportSource": "react"
+  }
 }

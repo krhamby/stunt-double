@@ -1,0 +1,26 @@
+name: react-router
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: react-router-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  react-router:
+    name: React Router 8 suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup     # Node 22 + npm cache + npm ci + npm run setup
+      # the dev probe drives the page in Chromium
+      - run: npm i -g playwright@1.56.1 && npx playwright install --with-deps chromium
+      - run: npm test -- react-router
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: react-router-results
+          path: /tmp/stunt-double-tests/*/results.json
+          if-no-files-found: ignore
