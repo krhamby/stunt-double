@@ -3,17 +3,70 @@
 import path from 'node:path';
 import { plural, posix } from './util.mjs';
 
+export const DOCS_BASE = 'https://github.com/krhamby/stunt-double/blob/main/docs/';
+
+/** Message code -> section of docs/errors.md (GitHub heading anchors). */
+const ANCHORS = {
+  F1: 'f1--contract-mismatch',
+  F2: 'f2--unknown-slot',
+  F3: 'f3--missing-implementation',
+  F4: 'f4--slot-claimed-twice',
+  F5: 'f5--wrong-export',
+  F6: 'f6--override-not-applied',
+  F7: 'f7--override-renders-itself',
+  W7: 'w7--possible-render-cycle',
+  F8: 'f8--duplicate-react-or-sdk',
+  F9: 'f9--server-and-client-mismatch',
+  STALE: 'stale--generated-files-out-of-date',
+  'TS-PNP': 'ts-pnp--typescript-7-under-yarn-pnp',
+  X1: 'x1--ignorebuilderrors-in-nextjs',
+  X2: 'x2--check-file-not-in-tsconfig',
+  X3: 'ts-pnp--typescript-7-under-yarn-pnp',
+  X4: 'x4--two-typescript-versions-installed',
+  'STUNT-DOUBLE-NOT-WIRED': 'stunt-double-not-wired--resolve-error',
+  'STUNT-DOUBLE-ERROR': 'stunt-double-error--poisoned-shim-in-dev',
+  TS: 'ts--type-error-in-an-override',
+  CFG: 'cfg--invalid-config',
+  SETUP: 'setup--sdk-or-typescript-not-found',
+  L1: 'l1-and-l2--brand-layer-mismatch',
+  L2: 'l1-and-l2--brand-layer-mismatch',
+  DOCTOR: 'doctor--setup-check',
+};
+
+/** The reference URL for one message code ("F2", "[F7?]", "SDK1", ...), or null for an unknown code. */
+export function docsUrl(code) {
+  const c = String(code).replace(/^\[|\??\]$/g, '');
+  if (/^SDK\d*$/.test(c)) return `${DOCS_BASE}sdk-authors.md#sdk-lint-reference`;
+  return ANCHORS[c] ? `${DOCS_BASE}errors.md#${ANCHORS[c]}` : null;
+}
+
+/** One "see <url>" footer line per distinct code among `lines` (in first-seen order). */
+export function docsFooter(lines) {
+  const urls = [];
+  for (const l of lines) {
+    const m = /^\s*\[([A-Z][A-Z0-9-]*)\??\]/.exec(String(l));
+    const u = m && docsUrl(m[1]);
+    if (u && !urls.includes(u)) urls.push(u);
+  }
+  return urls.map((u) => `see ${u}`);
+}
+
 export function header(p, n, what = 'injection error') {
   const sdk = p?.sdk ? ` (${p.sdk.name}@${p.sdk.version})` : '';
   return `stunt-double: ${plural(n, what)}${sdk}`;
 }
 
+/** A complete report: header, one line per item, then the reference footer. */
+export function formatReport(head, lines) {
+  return [head, ...lines, ...docsFooter(lines)].join('\n  ');
+}
+
 export function formatProblems(p, problems = p.problems) {
-  return `${header(p, problems.length)}\n  ${problems.join('\n  ')}`;
+  return formatReport(header(p, problems.length), problems);
 }
 
 export function formatWarnings(p, warnings = p.warnings) {
-  return `${header(p, warnings.length, 'warning')}\n  ${warnings.join('\n  ')}`;
+  return formatReport(header(p, warnings.length, 'warning'), warnings);
 }
 
 /** Split `tsc --pretty false` output into diagnostics (continuation lines are folded into the message). */
@@ -57,7 +110,7 @@ export function mapDiagnostics(p, output, map) {
         lines.push(`[STALE] ${where}: ${msg}   <- the installed ${p.sdk.name} differs from the one the check file was generated for: run \`npx stunt-double gen\``);
         break;
       case 'wiring':
-        lines.push(`[F6] ${info.slot}: "${p.sdk.slotPackage}/${info.slot}" does not resolve to the generated shim (${msg}). Add "paths": {"${p.sdk.slotPackage}/*": ["./${posix(path.relative(p.root, p.genDir))}/*"]} to ${p.tsconfigRel ?? 'tsconfig.json'}, or link ${p.sdk.slotPackage}, then run npx stunt-double gen.`);
+        lines.push(`[STALE] ${where}: ${msg}   <- the generated shim of slot "${info.slot}" is missing or out of date: run \`npx stunt-double gen\``);
         break;
       case 'slotset':
         lines.push(`[STALE] ${where}: ${msg}   <- the SDK's slot set changed since generation: run \`npx stunt-double gen\``);

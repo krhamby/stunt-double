@@ -1,379 +1,256 @@
-// `stunt-double init`: wire a project in place. Every edit is a TEXT insertion (comments, formatting and
-// quote style survive) and every step is idempotent: a second run changes nothing.
+// `stunt-double init`: OPTIONAL extras only. The default setup (install, one plugin line, src/overrides/) never
+// needs it. Every extra is opt-in by flag, idempotent, and prints each change; anything it cannot edit safely is
+// printed as a "! TODO" line instead.
 //
-//   1. framework layout     React Router / Remix keep code in app/: write stunt-double.config.json for it
-//   2. sdk-slots/package.json  the committed stub (no dependencies, no peers)
-//   3. package.json         link line per package manager (replacing a registry placeholder), typescript for
-//                           the type gate, postinstall + check scripts
-//   4. .gitignore           generated files
-//   5. tsconfig             "paths" for the slot package + the check file in "files" (solution-style aware)
-//   6. overrides directory
-//   7. tool configs         stuntDouble() into vite.config.* plugins (Vite, React Router) and into
-//                           astro.config.* vite.plugins (Astro has no top-level plugins); hints for the rest
+//   --plugin     add stuntDouble() to the Vite config (after react(); order does not matter)
+//   --editor     contract errors in the editor and the project's own tsc: the check file goes into the app
+//                tsconfig "files", plus a "postinstall": "stunt-double gen --no-fail" so a fresh clone has the
+//                file before tsc runs (never TS6053)
+//   --ci         "check": "stunt-double check" in package.json scripts
+//   --universal  tools without an adapter: link the slot package to a committed stub (sdk-slots/); generated
+//                files then live there (the link target is the outDir)
 import fs from 'node:fs';
 import path from 'node:path';
-import { generate } from './core/generate.mjs';
+import { generate, DEFAULT_OUT_DIR, CHECK_FILE } from './core/generate.mjs';
 import { formatProblems } from './core/diagnostics.mjs';
-import { detectPackageManager, CONFIG_FILE, PACKAGE_KEY } from './core/config.mjs';
-import { parseJsonc, posix, fileExists, dirExists } from './core/util.mjs';
+import { detectPackageManager } from './core/config.mjs';
+import { readTsconfig } from './core/tsconfig.mjs';
+import { gitignoreFor } from './core/emit.mjs';
+import { readJson, parseJsonc, posix, fileExists } from './core/util.mjs';
 
-const DEP_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies'];
-const TSC_IN_SCRIPT = /(^|&&|;|\|\|)\s*(npx\s+)?(tsc|vue-tsc|tsgo)(\s|$)/;
+export const INIT_FLAGS = ['plugin', 'editor', 'ci', 'universal'];
+export const UNIVERSAL_DIR = 'sdk-slots';
 
-/** Tool configs init knows. `edit` returns the new text, or null when it cannot place the adapter safely. */
-const TOOLS = [
-  { tool: 'vite', re: /^vite(st)?\.config\.(m|c)?[jt]s$/, edit: editViteConfig, hint: "plugins: [stuntDouble(), react()]  (import { stuntDouble } from 'stunt-double/vite')" },
-  { tool: 'astro', re: /^astro\.config\.(m|c)?[jt]s$/, edit: editAstroConfig, hint: "vite: { plugins: [stuntDouble()] }  (import { stuntDouble } from 'stunt-double/vite')" },
-  { tool: 'next', re: /^next\.config\.(m|c)?[jt]s$/, hint: "export default withStuntDouble(nextConfig)  (import { withStuntDouble } from 'stunt-double/next')" },
-  { tool: 'webpack', re: /^(webpack|rspack|rsbuild|craco)\.config\.(m|c)?[jt]s$/, hint: "export default withStuntDouble(config)  (import { withStuntDouble } from 'stunt-double/webpack')" },
-  { tool: 'jest', re: /^jest\.config\.(m|c)?[jt]s$/, hint: "export default withStuntDouble(config)  (import { withStuntDouble } from 'stunt-double/jest')" },
-  { tool: 'metro', re: /^metro\.config\.(m|c)?js$/, hint: "module.exports = withStuntDouble(getDefaultConfig(__dirname))  (require('stunt-double/metro'))" },
-  { tool: 'rollup/rolldown', re: /^(rollup|rolldown)\.config\.(m|c)?[jt]s$/, hint: "plugins: [stuntDouble()]  (import { stuntDouble } from 'stunt-double/vite')" },
+export const TOOL_CONFIGS = [
+  { tool: 'vite', re: /^vite(st)?\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/vite', hint: "plugins: [react(), stuntDouble()]  (import { stuntDouble } from 'stunt-double/vite')" },
+  { tool: 'next', re: /^next\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/next', hint: "export default withStuntDouble(nextConfig)  (import { withStuntDouble } from 'stunt-double/next')" },
+  { tool: 'webpack', re: /^(webpack|rspack|rsbuild|craco)\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/webpack', hint: "export default withStuntDouble(config)  (import { withStuntDouble } from 'stunt-double/webpack')" },
+  { tool: 'jest', re: /^jest\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/jest', hint: "export default withStuntDouble(config)  (import { withStuntDouble } from 'stunt-double/jest')" },
+  { tool: 'metro', re: /^metro\.config\.(m|c)?js$/, adapter: 'stunt-double/metro', hint: "module.exports = withStuntDouble(getDefaultConfig(__dirname))  (require('stunt-double/metro'))" },
+  { tool: 'rollup/rolldown', re: /^(rollup|rolldown)\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/vite', hint: "plugins: [stuntDouble()]  (import { stuntDouble } from 'stunt-double/vite')" },
 ];
 
-/**
- * @param {{ root: string, out?: (s: string) => void, err?: (s: string) => void }} o
- * @returns {Promise<number>} exit code
- */
-export async function runInit({ root: rootIn, out = (s) => process.stdout.write(s + '\n'), err = (s) => process.stderr.write(s + '\n') }) {
-  const root = path.resolve(rootIn ?? process.cwd());
-  const pkgFile = path.join(root, 'package.json');
-  if (!fileExists(pkgFile)) { err('stunt-double init: no package.json here.'); return 1; }
-  const pkgText = fs.readFileSync(pkgFile, 'utf8');
-  const pkg = JSON.parse(pkgText);
-  const pm = detectPackageManager(root);
-  const done = [];
-  const todo = [];
-
-  // 1. framework layout (before generate(), which reads the config)
-  const layout = detectLayout(root, pkg);
-  const cfgFile = path.join(root, CONFIG_FILE);
-  let wroteCfg = false;
-  if (layout.appDir && !fileExists(cfgFile) && !pkg[PACKAGE_KEY]) {
-    wroteCfg = true;
-    const cfg = { overridesDir: `${layout.appDir}/overrides`, checkFile: `${layout.appDir}/stunt-double.check.ts`, sourceDirs: [layout.appDir] };
-    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
-    done.push(`wrote ${CONFIG_FILE} (${layout.why}: overrides in ${cfg.overridesDir}/)`);
+/** Index of the bracket that closes the one opening at `open` (strings, template literals and comments skipped). */
+function matching(text, open) {
+  const pairs = { '(': ')', '[': ']', '{': '}' };
+  const stack = [];
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < text.length && text[i] !== q; i++) if (text[i] === '\\') i++; continue; }
+    if (c === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; continue; }
+    if (c === '/' && text[i + 1] === '*') { i = text.indexOf('*/', i + 2); if (i < 0) return -1; i++; continue; }
+    if (pairs[c]) stack.push(pairs[c]);
+    else if (c === ')' || c === ']' || c === '}') { if (stack.pop() !== c) return -1; if (!stack.length) return i; }
   }
+  return -1;
+}
 
-  const p0 = generate({ root, onError: 'return', write: false });
+/** Insert `stuntDouble()` into the first `plugins: [...]` array: right after react(...) if present, else last. */
+export function addVitePlugin(text) {
+  const m = /plugins\s*:\s*\[/.exec(text);
+  if (!m) return null;
+  const open = m.index + m[0].length - 1;
+  const close = matching(text, open);
+  if (close < 0) return null;
+  const body = text.slice(open + 1, close);
+  let at = -1;
+  const r = /(^|[\s,[(])react\s*\(/g;
+  for (let x; (x = r.exec(body)); ) {
+    const paren = open + 1 + x.index + x[0].length - 1;
+    const end = matching(text, paren);
+    if (end > 0 && end < close) { at = end + 1; break; }
+  }
+  let next;
+  if (at > 0) next = text.slice(0, at) + ', stuntDouble()' + text.slice(at);
+  else if (!body.trim()) next = text.slice(0, open + 1) + 'stuntDouble()' + text.slice(close);
+  else {
+    const trimmed = body.replace(/\s+$/, '');
+    const end = open + 1 + trimmed.length;
+    next = text.slice(0, end) + (trimmed.endsWith(',') ? ' ' : ', ') + 'stuntDouble()' + text.slice(end);
+  }
+  const imports = [...next.matchAll(/^import[^;]*?from\s*['"][^'"]+['"];?[ \t]*$/gm)];
+  const ip = imports.length ? imports.at(-1).index + imports.at(-1)[0].length : 0;
+  const semi = imports.length ? (/;\s*$/.test(imports.at(-1)[0]) ? ';' : '') : ';';
+  return next.slice(0, ip) + `${ip ? '\n' : ''}import { stuntDouble } from 'stunt-double/vite'${semi}${ip ? '' : '\n'}` + next.slice(ip);
+}
+
+function insertAfter(text, re, insertion) {
+  const m = re.exec(text);
+  if (!m) return null;
+  return text.slice(0, m.index + m[0].length) + insertion + text.slice(m.index + m[0].length);
+}
+
+/**
+ * Add `checkRel` to a tsconfig's "files" by TEXT insertion (comments survive). Adding "files" to a config that
+ * has neither "files" nor "include" (own or inherited) would shrink its program to that one file, so the default
+ * include is then written out explicitly. Returns { ok, change, todo }.
+ */
+export function addCheckFile(file, checkRel, replaceRel = null) {
+  let text = fs.readFileSync(file, 'utf8');
+  let json;
+  try { json = parseJsonc(text); } catch { return { ok: false, todo: `${path.basename(file)} is not valid JSON: add "${checkRel}" to its "files" by hand` }; }
+  const eff = readTsconfig(file);
+  const dir = path.dirname(file);
+  const want = path.resolve(dir, checkRel);
+  const own = Array.isArray(json.files) ? json.files : null;
+  if (own?.some((f) => path.resolve(dir, f) === want)) return { ok: true, change: null };
+  if (replaceRel && own?.some((f) => path.resolve(dir, f) === path.resolve(dir, replaceRel))) {
+    const re = new RegExp(`(["'])${replaceRel.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}\\1`);
+    const next = text.replace(re, `"${checkRel}"`);
+    if (next !== text) { fs.writeFileSync(file, next); return { ok: true, change: `"files": "${replaceRel}" -> "${checkRel}"` }; }
+  }
+  let next;
+  if (own) next = insertAfter(text, /"files"\s*:\s*\[/, `"${checkRel}"${own.length ? ', ' : ''}`);
+  else if (eff?.files) return { ok: false, todo: `${path.basename(file)} inherits "files" from its base config: add "${checkRel}" to the list by hand` };
+  else next = insertAfter(text, /^\s*\{/, `\n  "files": ["${checkRel}"],${eff?.include ? '' : '\n  "include": ["**/*"],'}`);
+  try { if (!next) throw new Error(); parseJsonc(next); } catch { return { ok: false, todo: `add "${checkRel}" to "files" in ${path.basename(file)}` }; }
+  fs.writeFileSync(file, next);
+  return { ok: true, change: `"files" += "${checkRel}"${!own && !eff?.include ? ' (and the default "include": ["**/*"], which "files" would otherwise turn off)' : ''}` };
+}
+
+function addScript(pkg, name, cmd, done, todo) {
+  pkg.scripts ??= {};
+  const cur = pkg.scripts[name];
+  if (cur && cur.includes(cmd)) return;
+  if (name === 'postinstall') {
+    pkg.scripts.postinstall = cur ? `${cur} && ${cmd}` : cmd;
+    done.push(`package.json script postinstall: ${pkg.scripts.postinstall}`);
+    return;
+  }
+  if (!cur) { pkg.scripts[name] = cmd; done.push(`package.json script ${name}: ${cmd}`); return; }
+  const alt = `${name}:slots`;
+  if (pkg.scripts[alt]?.includes(cmd)) return;
+  if (!pkg.scripts[alt]) { pkg.scripts[alt] = cmd; done.push(`package.json script ${alt}: ${cmd} ("${name}" is taken)`); return; }
+  todo.push(`add a script running "${cmd}" to package.json`);
+}
+
+/** Status of the default setup, for `init` without flags. */
+function status(root, p, out) {
+  const configs = fs.readdirSync(root).filter((f) => TOOL_CONFIGS.some((t) => t.re.test(f)));
+  if (!configs.length) out(`  !   no tool config found (vite.config.ts, ...): add the stunt-double adapter to the tool that builds your app`);
+  for (const f of configs) {
+    const t = TOOL_CONFIGS.find((x) => x.re.test(f));
+    const has = fs.readFileSync(path.join(root, f), 'utf8').includes('stunt-double');
+    out(has ? `  ok  ${f} uses ${t.adapter}` : `  !   ${f} does not use ${t.adapter}: ${t.hint}${t.tool === 'vite' ? ' (or: npx stunt-double init --plugin)' : ''}`);
+  }
+  if (p?.sdk) {
+    const n = Object.values(p.table).filter((e) => e.impl?.source === 'app').length;
+    out(fs.existsSync(p.overridesDir) ? `  ok  ${p.rel(p.overridesDir)}/: ${n} of ${p.slots.length} slots of ${p.sdk.name}@${p.sdk.version} overridden` : `  -   ${p.rel(p.overridesDir)}/ does not exist yet: every slot renders the ${p.sdk.name} default`);
+    out(`  ok  generated files: ${p.rel(p.outDir)}/ (${p.tier === 'universal' ? 'universal tier: the linked slot package' : 'self-ignoring; never edit'})`);
+  }
+}
+
+export async function cmdInit(a, { out, err }) {
+  const root = path.resolve(a.values.root ?? process.cwd());
+  const pkgFile = path.join(root, 'package.json');
+  const pkg = readJson(pkgFile);
+  if (!pkg) { err('stunt-double init: no package.json here.'); return 1; }
+  const want = new Set(INIT_FLAGS.filter((f) => a.flags.has(f)));
+  const pm = detectPackageManager(root);
+  const p0 = generate({ root, ...(a.values.config ? { configFile: a.values.config } : {}), onError: 'return', write: false });
+  if (!want.size) {
+    out('stunt-double init: the default setup needs no init (install, one plugin line, overrides in src/overrides/).');
+    status(root, p0, out);
+    if (!p0.sdk) err(formatProblems(p0));
+    const sdkSlots = p0.sdk?.slotPackage ?? '<sdk>-slots';
+    const checkRel = p0.tsconfig ? posix(path.relative(root, path.join(root, DEFAULT_OUT_DIR, CHECK_FILE))) : `${DEFAULT_OUT_DIR}/${CHECK_FILE}`;
+    out(`Optional extras (add any by flag; safe to re-run):`);
+    out(`  --plugin     add stuntDouble() to the Vite config`);
+    out(`  --editor     contract errors in your editor and tsc: adds ${p0.tier === 'universal' ? `${UNIVERSAL_DIR}/${CHECK_FILE}` : checkRel} to ${p0.tsconfigRel ?? 'tsconfig.json'} "files", and "postinstall": "stunt-double gen --no-fail" so a fresh clone has it before tsc runs`);
+    out(`  --ci         add "check": "stunt-double check" to package.json scripts (run it in CI before the build)`);
+    out(`  --universal  tools without a stunt-double adapter: link ${sdkSlots} to a committed ./${UNIVERSAL_DIR} stub (generated files move there); prefix those tools' scripts with "stunt-double check &&"`);
+    return 0;
+  }
   if (!p0.sdk) { err(formatProblems(p0)); err('stunt-double init: install the SDK first.'); return 1; }
   const sdk = p0.sdk;
-  if (wroteCfg) addSchema(cfgFile, sdk);
-  const slotsRel = posix(path.relative(root, p0.slotsDir));
+  const done = [];
+  const todo = [];
+  let pkgChanged = false;
+  let linkAdded = false;
+  let outDir = p0.outDir;
 
-  // 2. committed stub
-  const stub = path.join(p0.slotsDir, 'package.json');
-  if (!fileExists(stub)) {
-    fs.mkdirSync(p0.slotsDir, { recursive: true });
-    fs.writeFileSync(stub, JSON.stringify({
-      name: sdk.slotPackage, version: '0.0.0', private: true, type: 'module', sideEffects: false,
-      description: `Generated slot package for ${sdk.name} (stunt-double). Commit this file; gen/ is generated (npx stunt-double gen). No dependencies or peers, ever.`,
-      exports: { './package.json': './package.json', './*': { types: './gen/*.d.ts', default: './gen/*.jsx' } },
-    }, null, 2) + '\n');
-    done.push(`wrote ${slotsRel}/package.json (committed stub, no dependencies or peers)`);
+  if (want.has('universal')) {
+    const slotsDir = p0.tier === 'universal' ? p0.outDir : path.join(root, UNIVERSAL_DIR);
+    const slotsRel = posix(path.relative(root, slotsDir));
+    const stub = path.join(slotsDir, 'package.json');
+    if (!fs.existsSync(stub)) {
+      fs.mkdirSync(slotsDir, { recursive: true });
+      fs.writeFileSync(stub, JSON.stringify({
+        name: sdk.slotPackage, version: '0.0.0', private: true, type: 'module', sideEffects: false,
+        description: `The project's slot package for ${sdk.name} (stunt-double universal tier). Commit this file; everything else here is generated. No dependencies or peers, ever.`,
+        exports: { './package.json': './package.json', './*': { types: './gen/*.d.ts', default: './gen/*.jsx' } },
+      }, null, 2) + '\n');
+      done.push(`wrote ${slotsRel}/package.json (commit it; no dependencies or peers)`);
+    }
+    const gi = path.join(slotsDir, '.gitignore');
+    if (!fs.existsSync(gi)) fs.writeFileSync(gi, gitignoreFor({ tier: 'universal' }));
+    if (p0.tier !== 'universal') {
+      const line = { npm: `file:./${slotsRel}`, pnpm: `link:./${slotsRel}`, yarn: `portal:./${slotsRel}`, bun: 'workspace:*' }[pm] ?? `file:./${slotsRel}`;
+      pkg.dependencies ??= {};
+      if (pkg.dependencies[sdk.slotPackage] && pkg.dependencies[sdk.slotPackage] !== line) todo.push(`replace "${sdk.slotPackage}": "${pkg.dependencies[sdk.slotPackage]}" with "${line}" in package.json dependencies`);
+      else if (!pkg.dependencies[sdk.slotPackage]) { pkg.dependencies[sdk.slotPackage] = line; done.push(`dependency "${sdk.slotPackage}": "${line}" (${pm} link form)`); pkgChanged = true; linkAdded = true; }
+      if (pm === 'bun') {
+        pkg.workspaces ??= [];
+        if (Array.isArray(pkg.workspaces) && !pkg.workspaces.includes(slotsRel)) { pkg.workspaces.push(slotsRel); done.push(`workspaces += ${slotsRel}`); pkgChanged = true; }
+      }
+      if (p0.cfg.outDir && path.resolve(root, p0.cfg.outDir) !== slotsDir) todo.push(`remove "outDir" from ${p0.configSource}: the universal tier generates into ${slotsRel}/`);
+      const old = path.join(root, DEFAULT_OUT_DIR);
+      if (old !== slotsDir && fs.existsSync(path.join(old, '.gitignore'))) { fs.rmSync(old, { recursive: true, force: true }); done.push(`removed ${DEFAULT_OUT_DIR}/ (generated files now live in ${slotsRel}/)`); }
+    }
+    outDir = slotsDir;
+    todo.push(`run ${pm} install (creates the link), then prefix each tool WITHOUT a stunt-double adapter: "stunt-double check && <tool>"`);
   }
 
-  // 3. package.json: link line, typescript, scripts
-  const line = { npm: `file:./${slotsRel}`, pnpm: `link:./${slotsRel}`, yarn: `portal:./${slotsRel}`, bun: 'workspace:*' }[pm] ?? `file:./${slotsRel}`;
-  const field = DEP_FIELDS.find((f) => pkg[f]?.[sdk.slotPackage]);
-  const spec = field ? pkg[field][sdk.slotPackage] : null;
-  if (!spec) {
-    (pkg.dependencies ??= {})[sdk.slotPackage] = line;
-    done.push(`dependency "${sdk.slotPackage}": "${line}" (${pm})`);
-  } else if (!linksTo(spec, root, p0.slotsDir)) {
-    // a registry spec or a tarball (the SDK's placeholder package): the SDK would resolve it, never the shims
-    pkg[field][sdk.slotPackage] = line;
-    done.push(`${field} "${sdk.slotPackage}": "${spec}" -> "${line}" (the registry placeholder must be replaced by the link, ${pm})`);
-  }
-  if (pm === 'bun') {
-    const ws = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces ??= []);
-    if (Array.isArray(ws) && !ws.includes(slotsRel)) { ws.push(slotsRel); done.push(`workspaces += ${slotsRel}`); }
-  }
-  const tsName = p0.cfg.typescript ?? 'typescript';
-  if (!DEP_FIELDS.some((f) => pkg[f]?.[tsName]) && !installedUpwards(tsName, root)) {
-    const range = tsName !== 'typescript' ? 'npm:typescript@^5.9.3' : pm === 'yarn' && p0.isPnP ? '^5.9.3' : '^7.0.2';
-    (pkg.devDependencies ??= {})[tsName] = range;
-    done.push(`devDependency "${tsName}": "${range}" (the build's contract type gate runs tsc)`);
-  }
-  pkg.scripts ??= {};
-  if (!/stunt-double\s+gen/.test(pkg.scripts.postinstall ?? '')) {
-    pkg.scripts.postinstall = pkg.scripts.postinstall ? `${pkg.scripts.postinstall} && stunt-double gen --no-fail` : 'stunt-double gen --no-fail';
-    done.push('script postinstall: stunt-double gen --no-fail');
-  }
-  if (!pkg.scripts.check) { pkg.scripts.check = 'stunt-double check'; done.push('script check: stunt-double check'); }
-  // `tsc -b && vite build` (Vite template), `react-router typegen && tsc`: tsc runs before any adapter, so it
-  // would see a stale or missing check file (TS6053) or report raw check-file TS2322 lines instead of the [F*]
-  // report. `stunt-double check` regenerates and runs the mapped contract gate first.
-  for (const [name, script] of Object.entries(pkg.scripts)) {
-    if (name === 'postinstall' || /stunt-double/.test(script) || !TSC_IN_SCRIPT.test(script)) continue;
-    pkg.scripts[name] = `stunt-double check && ${script}`;
-    done.push(`script ${name}: stunt-double check && ${script}`);
-  }
-  const indent = /^\{\r?\n([ \t]+)"/.exec(pkgText)?.[1] ?? '  ';
-  const nextPkg = JSON.stringify(pkg, null, indent) + (pkgText.endsWith('\n') ? '\n' : '');
-  if (nextPkg !== pkgText) fs.writeFileSync(pkgFile, nextPkg);
-
-  // 4. .gitignore
-  const giFile = path.join(root, '.gitignore');
-  const gi = fileExists(giFile) ? fs.readFileSync(giFile, 'utf8') : '';
-  const have = new Set(gi.split(/\r?\n/).map((l) => l.trim().replace(/^\//, '')));
-  const wantGi = [`${slotsRel}/gen/`, posix(path.relative(root, p0.checkFile))].filter((l) => !have.has(l));
-  if (wantGi.length) {
-    fs.writeFileSync(giFile, `${gi}${gi && !gi.endsWith('\n') ? '\n' : ''}${gi ? '\n' : ''}# stunt-double (generated)\n${wantGi.join('\n')}\n`);
-    done.push(`.gitignore += ${wantGi.join(', ')}`);
-  }
-
-  // 5. tsconfig paths + files
-  const tsFile = p0.tsconfig;
-  const tsDir = tsFile ? path.dirname(tsFile) : root;
-  const checkRel = posix(path.relative(tsDir, p0.checkFile));
-  const genGlob = `./${posix(path.relative(tsDir, p0.genDir))}/*`;
-  if (tsFile) {
-    const r = editTsconfig(tsFile, sdk.slotPackage, genGlob, checkRel);
-    if (r.changes.length) done.push(`${p0.rel(tsFile)}: ${r.changes.join(', ')}`);
-    if (!r.ok) todo.push(`add to ${p0.rel(tsFile)}: "compilerOptions": {"paths": {"${sdk.slotPackage}/*": ["${genGlob}"]}} and "files": ["${checkRel}"]`);
-  } else {
-    todo.push(`create a tsconfig.json with "compilerOptions": {"paths": {"${sdk.slotPackage}/*": ["${genGlob}"]}} and "files": ["${checkRel}"]`);
-  }
-
-  // 6. overrides dir
-  if (!dirExists(p0.overridesDir)) {
-    fs.mkdirSync(p0.overridesDir, { recursive: true });
-    fs.writeFileSync(path.join(p0.overridesDir, '.gitkeep'), '');
-    done.push(`created ${p0.rel(p0.overridesDir)}/`);
-  }
-
-  // 7. tool configs
-  for (const f of fs.readdirSync(root).sort()) {
-    const t = TOOLS.find((x) => x.re.test(f));
-    if (!t) continue;
-    const file = path.join(root, f);
-    const text = fs.readFileSync(file, 'utf8');
-    if (text.includes('stunt-double')) continue;
-    const next = t.edit?.(text);
-    if (next) { fs.writeFileSync(file, next); done.push(`${f}: added stuntDouble() to ${t.tool === 'astro' ? 'vite.plugins' : 'plugins'}`); }
-    else todo.push(`${f}: ${t.hint}`);
-  }
-
-  for (const d of done) out(`  + ${d}`);
-  for (const t of todo) out(`  ! TODO ${t}`);
-  if (!done.length && !todo.length) { out('stunt-double init: already wired, nothing to change.'); return 0; }
-  const required = sdk.slotNames.filter((s) => sdk.slots[s].required && !p0.table[s]?.impl);
-  out(`stunt-double init: done. Next: ${pm} install (links ${sdk.slotPackage} and runs stunt-double gen), then put overrides in ${p0.rel(p0.overridesDir)}/ (npx stunt-double eject <Slot>).`);
-  if (required.length) out(`  required slots without an implementation (every build fails with [F3] until they exist): ${required.map((s) => `${s} (npx stunt-double eject ${s})`).join(', ')}`);
-  return 0;
-}
-
-/** Is `spec` a link to the slots directory (npm file:, pnpm link:, Yarn portal:, Bun workspace:)? A file: TARBALL is a copy. */
-export function linksTo(spec, root, slotsDir) {
-  if (/^workspace:/.test(spec)) return true;
-  const m = /^(file:|link:|portal:)(.*)$/.exec(spec);
-  return !!m && path.resolve(root, m[2]) === path.resolve(slotsDir);
-}
-
-/** Installed in node_modules of the project or an ancestor (a workspace root)? NODE_PATH / globals do not count. */
-function installedUpwards(name, root) {
-  for (let d = root; ; d = path.dirname(d)) {
-    if (fileExists(path.join(d, 'node_modules', name, 'package.json'))) return true;
-    if (path.dirname(d) === d) return false;
-  }
-}
-
-// ---------------------------------------------------------------------------------------------------------
-// layout
-
-/** React Router 7/8 framework mode and Remix keep application code in app/ (react-router.config appDirectory). */
-export function detectLayout(root, pkg) {
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-  const rrConfig = fs.readdirSync(root).find((f) => /^react-router\.config\.(m|c)?[jt]s$/.test(f));
-  if (rrConfig || deps['@react-router/dev'] || deps['@remix-run/dev']) {
-    const text = rrConfig ? fs.readFileSync(path.join(root, rrConfig), 'utf8') : '';
-    const appDir = (/appDirectory\s*:\s*['"`]([^'"`]+)['"`]/.exec(stripJsComments(text))?.[1] ?? 'app').replace(/^\.\//, '').replace(/\/$/, '');
-    return { appDir, why: rrConfig ? `${rrConfig} appDirectory` : 'React Router / Remix app directory' };
-  }
-  if (!dirExists(path.join(root, 'src')) && dirExists(path.join(root, 'app'))) return { appDir: 'app', why: 'no src/, code lives in app/' };
-  return { appDir: null };
-}
-
-/** Put "$schema" (slot-name autocompletion) and "sdk" first in the config file init just wrote. */
-function addSchema(cfgFile, sdk) {
-  const text = fs.readFileSync(cfgFile, 'utf8');
-  let json;
-  try { json = parseJsonc(text); } catch { return; }
-  const schema = path.join(sdk.dir, 'stunt-double.schema.json');
-  const head = { ...(fileExists(schema) ? { $schema: `./node_modules/${sdk.name}/stunt-double.schema.json` } : {}), sdk: sdk.name };
-  fs.writeFileSync(cfgFile, JSON.stringify({ ...head, ...json }, null, 2) + '\n');
-}
-
-// ---------------------------------------------------------------------------------------------------------
-// JSONC text editing (tsconfig): find containers by key path, skipping strings and comments
-
-/** Map "key.path" -> index of the `{` / `[` that opens that value ('' = the root object). */
-export function jsoncContainers(text) {
-  const found = new Map();
-  const stack = [];
-  let lastString = null;
-  let pendingKey = null;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === '"') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
-      try { lastString = JSON.parse(text.slice(i, j + 1)); } catch { lastString = text.slice(i + 1, j); }
-      i = j;
-    } else if (c === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i++;
-    } else if (c === '/' && text[i + 1] === '*') {
-      const e = text.indexOf('*/', i + 2);
-      i = e < 0 ? text.length : e + 1;
-    } else if (c === ':') {
-      pendingKey = lastString;
-    } else if (c === '{' || c === '[') {
-      const parent = stack.at(-1);
-      const keyPath = !parent ? [] : parent.type === '{' ? [...parent.path, pendingKey] : [...parent.path, '#'];
-      const k = keyPath.join('\u0000');
-      if (!found.has(k)) found.set(k, i);
-      stack.push({ type: c, path: keyPath });
-      pendingKey = null;
-    } else if (c === '}' || c === ']') {
-      stack.pop();
-    } else if (c === ',') {
-      pendingKey = null;
+  if (want.has('editor')) {
+    const checkAbs = path.join(outDir, CHECK_FILE);
+    const ts = p0.tsconfig;
+    if (!ts) todo.push(`create a tsconfig.json; then add "${posix(path.relative(root, checkAbs))}" to its "files"`);
+    else {
+      const rel = posix(path.relative(path.dirname(ts), checkAbs));
+      const oldRel = outDir !== p0.outDir ? posix(path.relative(path.dirname(ts), p0.checkFile)) : null;
+      const r = addCheckFile(ts, rel, oldRel);
+      if (r.change) done.push(`${p0.rel(ts)}: ${r.change}`);
+      if (r.todo) todo.push(r.todo);
+    }
+    addScript(pkg, 'postinstall', 'stunt-double gen --no-fail', done, todo);
+    pkgChanged = true;
+  } else if (want.has('universal') && p0.tsconfig) {
+    // keep an existing editor opt-in pointing at the one generated location
+    const oldRel = posix(path.relative(path.dirname(p0.tsconfig), p0.checkFile));
+    const t = readTsconfig(p0.tsconfig);
+    if ((t?.json?.files ?? []).some((f) => path.resolve(path.dirname(p0.tsconfig), f) === p0.checkFile)) {
+      const r = addCheckFile(p0.tsconfig, posix(path.relative(path.dirname(p0.tsconfig), path.join(outDir, CHECK_FILE))), oldRel);
+      if (r.change) done.push(`${p0.rel(p0.tsconfig)}: ${r.change}`);
+      if (r.todo) todo.push(r.todo);
     }
   }
-  return { get: (...keys) => found.get(keys.join('\u0000')) };
-}
 
-/** Index of the next significant (non-space, non-comment) character after `i`. */
-function nextSignificant(text, i) {
-  for (let j = i; j < text.length; j++) {
-    const c = text[j];
-    if (/\s/.test(c)) continue;
-    if (c === '/' && text[j + 1] === '/') { while (j < text.length && text[j] !== '\n') j++; continue; }
-    if (c === '/' && text[j + 1] === '*') { const e = text.indexOf('*/', j + 2); j = e < 0 ? text.length : e + 1; continue; }
-    return j;
+  if (want.has('ci')) { addScript(pkg, 'check', 'stunt-double check', done, todo); pkgChanged = true; }
+  if (pkgChanged) fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
+
+  if (want.has('plugin')) {
+    let found = false;
+    for (const f of fs.readdirSync(root)) {
+      const t = TOOL_CONFIGS.find((x) => x.re.test(f));
+      if (!t) continue;
+      found = true;
+      const file = path.join(root, f);
+      const text = fs.readFileSync(file, 'utf8');
+      if (text.includes('stunt-double')) continue;
+      const next = t.tool === 'vite' ? addVitePlugin(text) : null;
+      if (next) { fs.writeFileSync(file, next); done.push(`${f}: added stuntDouble() to plugins`); } else todo.push(`${f}: ${t.hint}`);
+    }
+    if (!found) todo.push(`no tool config found: add the stunt-double adapter to the tool that builds your app`);
   }
-  return text.length;
-}
 
-/** Indentation for a new member of the container opened at `open` (copied from its first member). */
-function memberIndent(text, open, fallback) {
-  const lineStart = text.lastIndexOf('\n', open) + 1;
-  const own = /^[ \t]*/.exec(text.slice(lineStart))[0];
-  const m = /^[^\S\n]*\n([ \t]+)\S/.exec(text.slice(open + 1));
-  return m ? m[1] : own + fallback;
-}
-
-/** Insert `member` as the first member of the object/array opened at `open`. */
-function insertMember(text, open, member, multiline = true) {
-  const empty = text[nextSignificant(text, open + 1)] === (text[open] === '{' ? '}' : ']');
-  if (!multiline) return text.slice(0, open + 1) + member + (empty ? '' : ', ') + text.slice(open + 1);
-  const ind = memberIndent(text, open, '  ');
-  return text.slice(0, open + 1) + `\n${ind}${member}${empty ? '\n' : ','}` + text.slice(open + 1);
-}
-
-/** Add the slot "paths" entry and the check file to a tsconfig by TEXT insertion, so comments survive. */
-export function editTsconfig(file, slotPackage, genGlob, checkRel) {
-  const dir = path.dirname(file);
-  const original = fs.readFileSync(file, 'utf8');
-  let text = original;
-  let json;
-  try { json = parseJsonc(text); } catch { return { ok: false, changes: [] }; }
-  const changes = [];
-  const key = `${slotPackage}/*`;
-  if (!json.compilerOptions?.paths?.[key]) {
-    const at = jsoncContainers(text);
-    const entry = `"${key}": ["${genGlob}"]`;
-    if (at.get('compilerOptions', 'paths') !== undefined) text = insertMember(text, at.get('compilerOptions', 'paths'), entry);
-    else if (at.get('compilerOptions') !== undefined) text = insertMember(text, at.get('compilerOptions'), `/* stunt-double: types follow the generated shims, even inside node_modules/${slotPackage.split('/')[0]} */\n${memberIndent(text, at.get('compilerOptions'), '  ')}"paths": { ${entry} }`);
-    else if (at.get() !== undefined) text = insertMember(text, at.get(), `"compilerOptions": { "paths": { ${entry} } }`);
-    changes.push(`paths "${key}"`);
+  // generate now, so the editor opt-in never sees a missing file and the result is visible immediately
+  if ((want.has('editor') || want.has('universal')) && !linkAdded) {
+    const g = generate({ root, ...(a.values.config ? { configFile: a.values.config } : {}), onError: 'return' });
+    if (g.problems.length) todo.push(`fix the problems below, then run npx stunt-double gen\n${formatProblems(g)}`);
+    else if (fileExists(g.checkFile)) done.push(`generated ${g.rel(g.outDir)}/`);
   }
-  if (!(json.files ?? []).some((f) => path.resolve(dir, f) === path.resolve(dir, checkRel))) {
-    const at = jsoncContainers(text);
-    const open = at.get('files');
-    if (open !== undefined) text = insertMember(text, open, `"${checkRel}"`, text.slice(open, text.indexOf(']', open)).includes('\n'));
-    else if (at.get() !== undefined) text = insertMember(text, at.get(), `/* stunt-double: a missing generated check file is TS6053, never "silently unchecked" */\n${memberIndent(text, at.get(), '  ')}"files": ["${checkRel}"]`);
-    changes.push(`files "${checkRel}"`);
-  }
-  let after;
-  try { after = parseJsonc(text); } catch { return { ok: false, changes: [] }; }
-  if (!after.compilerOptions?.paths?.[key] || !(after.files ?? []).some((f) => path.resolve(dir, f) === path.resolve(dir, checkRel))) return { ok: false, changes: [] };
-  if (text !== original) fs.writeFileSync(file, text);
-  return { ok: true, changes };
-}
-
-// ---------------------------------------------------------------------------------------------------------
-// JS config editing (vite / astro)
-
-function stripJsComments(text) {
-  return text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:'"`])\/\/[^\n]*/g, (m, pre) => pre + ' '.repeat(m.length - pre.length));
-}
-
-/** Add `import { stuntDouble } from 'stunt-double/vite'` after the last import, in the file's own style. */
-export function addImport(text) {
-  const code = stripJsComments(text);
-  const re = /^import\s+(?:[^'"`;]*?\s+from\s+)?(['"])[^'"]+\1[ \t]*(;?)/gm;
-  let last = null;
-  let m;
-  while ((m = re.exec(code))) last = m;
-  const q = last?.[1] ?? (/^import[^\n]*"/m.test(code) ? '"' : "'");
-  const semi = last ? last[2] : ';';
-  const stmt = `import { stuntDouble } from ${q}stunt-double/vite${q}${semi}`;
-  if (!last) {
-    const lead = /^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*/.exec(text)[0];
-    return text.slice(0, lead.length) + stmt + '\n' + text.slice(lead.length);
-  }
-  const end = last.index + last[0].length;
-  return text.slice(0, end) + '\n' + stmt + text.slice(end);
-}
-
-/** vite.config.*: first entry of `plugins: [` (enforce:'pre' makes the order irrelevant), else a new key. */
-export function editViteConfig(text) {
-  const code = stripJsComments(text);
-  const pl = /\bplugins\s*:\s*\[/.exec(code);
-  let next;
-  if (pl) next = insertAt(text, pl.index + pl[0].length, 'stuntDouble(), ');
-  else {
-    const dc = /\bdefineConfig\(\s*\{/.exec(code) ?? /\bexport\s+default\s*\{/.exec(code);
-    if (!dc) return null;
-    next = insertAt(text, dc.index + dc[0].length, '\n  plugins: [stuntDouble()],');
-  }
-  return addImport(next);
-}
-
-/** astro.config.*: Astro has no top-level `plugins`; the Vite plugin goes into `vite: { plugins: [...] }`. */
-export function editAstroConfig(text) {
-  const code = stripJsComments(text);
-  const vite = /\bvite\s*:\s*\{/.exec(code);
-  let next;
-  if (vite) {
-    const body = code.slice(vite.index + vite[0].length, matchBrace(code, vite.index + vite[0].length - 1));
-    const pl = /\bplugins\s*:\s*\[/.exec(body);
-    const at = vite.index + vite[0].length;
-    next = pl ? insertAt(text, at + pl.index + pl[0].length, 'stuntDouble(), ') : insertAt(text, at, ' plugins: [stuntDouble()],');
-  } else {
-    const dc = /\bdefineConfig\(\s*\{/.exec(code) ?? /\bexport\s+default\s*\{/.exec(code);
-    if (!dc) return null;
-    const at = dc.index + dc[0].length;
-    const empty = code[nextSignificant(code, at)] === '}';
-    next = insertAt(text, at, empty ? '\n  vite: { plugins: [stuntDouble()] },\n' : '\n  vite: { plugins: [stuntDouble()] },');
-  }
-  return addImport(next);
-}
-
-function insertAt(text, at, s) { // offsets come from comment-stripped code of the same length
-  return text.slice(0, at) + s + text.slice(at);
-}
-
-function matchBrace(code, open) {
-  let depth = 0;
-  for (let i = open; i < code.length; i++) {
-    const c = code[i];
-    if (c === '"' || c === "'" || c === '`') { const q = c; i++; while (i < code.length && code[i] !== q) i += code[i] === '\\' ? 2 : 1; continue; }
-    if (c === '{') depth++;
-    else if (c === '}' && --depth === 0) return i;
-  }
-  return code.length;
+  for (const d of done) out(`  + ${d}`);
+  for (const t of todo) out(`  ! TODO ${t}`);
+  out(`stunt-double init: ${done.length ? 'done' : 'nothing to change'}.`);
+  return 0;
 }

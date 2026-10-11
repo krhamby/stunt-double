@@ -1,26 +1,41 @@
 // stunt-double/vite: the Vite 8 / Vitest 5 plugin. The same object is a Rollup / Rolldown plugin: Vite-only
 // hooks are ignored there.
 //
-//   plugins: [react(), stuntDouble()]
+//   plugins: [react(), stuntDouble()]        (order does not matter: enforce 'pre')
 //
-// What it does (spec §6.1):
-//   config          STA (generate) + ONE static alias  @acme/core-slots/<Slot> -> <root>/sdk-slots/gen/<Slot>.jsx,
-//                   dedupe, optimizer belt and braces, ssr.noExternal / Vitest server.deps.inline for the SDK
+// What it does:
+//   config          STA (generate into <root>/.stunt-double/) + ONE static alias
+//                   @acme/core-slots/<Slot> -> <outDir>/gen/<Slot>.jsx, dedupe, optimizer belt and braces,
+//                   ssr.noExternal / Vitest server.deps.inline for the SDK
 //   configResolved  CFG guards: graphs the plugin cannot see would silently use SDK defaults -> config error
 //   buildStart      STA problems -> this.error (exit 1); TYP gate (memoized for client + SSR) -> this.error
 //   buildEnd        AUD: post-bundle graph audit -> this.error
 //   dev             regenerate on change, poisoned shims + overlay push, async type gate
 import fs from 'node:fs';
 import path from 'node:path';
-import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
+import { generate, StuntDoubleError } from '../core/generate.mjs';
+import { emitPoison } from '../core/emit.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, rollupGraph } from '../core/audit.mjs';
-import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
+import { formatProblems, formatWarnings, formatReport, header } from '../core/diagnostics.mjs';
+import { DEFAULTS } from '../core/config.mjs';
 import { esc, cleanId, isInside } from '../core/util.mjs';
 
 const PLUGIN = 'stunt-double';
+const PLUGIN_OPTIONS = new Set(['typecheck', 'audit', 'root', 'configFile', ...Object.keys(DEFAULTS)]);
 
 const covered = (list, name) => list === true || [].concat(list ?? []).some((x) => (x instanceof RegExp ? x.test(name) : x === name));
+
+/**
+ * For this.error(): an Error whose stack equals "<name>: <message>", so Rolldown's summary does not repeat the
+ * report or add stunt-double frames. (Rolldown still wraps it in its own aggregate error with its own frames, so
+ * reports that can be raised before bundling are thrown from configResolved instead: see there.)
+ */
+function reportError(message) {
+  const e = new Error(message);
+  e.stack = `Error: ${message}`;
+  return e;
+}
 
 /** @param {import('./vite.d.ts').StuntDoubleViteOptions} [opts] */
 export function stuntDouble(opts = {}) {
@@ -28,8 +43,21 @@ export function stuntDouble(opts = {}) {
   let command = 'build';
   let gate = null;
   let warned = false;
+  let checkedAtConfig = false;
+  let viteConfigured = false;
   const vitest = !!process.env.VITEST;
-  const { typecheck = true, audit = true, ...genOpts } = opts;
+  const { typecheck = true, audit = true, ...genOpts } = opts ?? {};
+  const unknownOptions = Object.keys(opts ?? {}).filter((k) => !PLUGIN_OPTIONS.has(k));
+  const optionProblems = unknownOptions.map((k) => `[CFG] unknown stuntDouble() option "${k}". Known options: ${[...PLUGIN_OPTIONS].join(', ')}.`);
+  const load = (root, onError) => {
+    if (!optionProblems.length) return generate({ ...genOpts, root, onError });
+    const next = generate({ ...genOpts, root, onError: 'return' });
+    next.problems.unshift(...optionProblems);
+    if (onError === 'poison') { next.changedFiles = emitPoison(next, next.problems); next.poisoned = true; }
+    if (onError === 'throw') throw new StuntDoubleError(formatProblems(next), next.problems);
+    return next;
+  };
+  const fail = (lines) => { throw new StuntDoubleError(formatReport(header(p, lines.length), lines), lines); };
 
   const tripwire = {
     name: `${PLUGIN}:optimizer-tripwire`,
@@ -38,7 +66,7 @@ export function stuntDouble(opts = {}) {
       // file): reading an entry to find its imports is not pre-bundling it.
       if (this.getModuleInfo?.(id)?.isEntry) return null;
       if (p?.sdk && p.isProjectSlotFile(cleanId(id)))
-        this.error(`[F6] the dependency optimizer tried to pre-bundle ${p.rel(cleanId(id))}: the override decision would be frozen into .vite/deps. Remove custom optimizeDeps settings that pull in ${p.sdk.slotPackage}.`);
+        this.error(reportError(formatReport(header(p, 1), [`[F6] the dependency optimizer tried to pre-bundle ${p.rel(cleanId(id))}: the override decision would be frozen into .vite/deps. Remove custom optimizeDeps settings that pull in ${p.sdk.slotPackage}.`])));
     },
   };
 
@@ -49,9 +77,10 @@ export function stuntDouble(opts = {}) {
     // ---- Vite: config + STA --------------------------------------------------------------------------
     config(user, env) {
       command = env?.command ?? 'build';
+      viteConfigured = true;
       const root = path.resolve(user.root ?? opts.root ?? process.cwd());
-      p = generate({ ...genOpts, root, onError: vitest ? 'throw' : command === 'serve' ? 'poison' : 'return' });
-      if (!p.sdk) return {}; // fail closed: buildStart reports, nothing is aliased
+      p = load(root, vitest ? 'throw' : command === 'serve' ? 'poison' : 'return');
+      if (!p.sdk) return {}; // fail closed: configResolved / the dev overlay report it, nothing is aliased
       const pk = p.packages;
       return {
         resolve: {
@@ -74,32 +103,48 @@ export function stuntDouble(opts = {}) {
     },
 
     // ---- CFG guards ---------------------------------------------------------------------------------
-    configResolved(c) {
-      if (!p?.sdk) return;
+    async configResolved(c) {
+      if (!p?.sdk) {
+        if (command === 'build' && !vitest && p?.problems.length) throw new StuntDoubleError(formatProblems(p), p.problems);
+        return;
+      }
       const pk = p.packages;
-      const inline = c.test?.server?.deps?.inline;
+      // Vitest's server.deps.inline only applies inside Vitest. Outside it (vite build --ssr, the dev SSR
+      // module runner) the plugin's own inline entry must not count as coverage.
+      const inline = vitest ? c.test?.server?.deps?.inline : undefined;
       for (const [name, env] of Object.entries(c.environments ?? {})) {
         if (env.consumer === 'server') for (const n of pk) {
           const external = env.resolve?.external;
+          // an explicit external list beats noExternal in Vite; `external: true` does not (noExternal wins)
           const explicitlyExternal = Array.isArray(external) && external.includes(n);
-          // test.server.deps.inline only rescues an externalized SDK under Vitest. stuntDouble() always sets it,
-          // so honouring it in `vite build` would disable this guard for every SSR / framework server build.
-          if ((explicitlyExternal || !covered(env.resolve?.noExternal, n)) && !(vitest && covered(inline, n)))
-            throw new StuntDoubleError(`[F6] Vite environment "${name}" externalizes ${n}: Node would load it natively and slot overrides could not apply there. Keep stunt-double's ssr.noExternal${explicitlyExternal ? ` (remove "${n}" from ssr.external / resolve.external)` : ''}.`);
+          if ((explicitlyExternal || !covered(env.resolve?.noExternal, n)) && !covered(inline, n))
+            fail([`[F6] Vite environment "${name}" externalizes ${n}: Node would load it natively and slot overrides could not apply there. Keep stunt-double's ssr.noExternal${explicitlyExternal ? ` (remove "${n}" from ssr.external / resolve.external)` : ''}.`]);
         }
         if ((env.optimizeDeps?.include ?? []).some((i) => i === p.sdk.slotPackage || i.startsWith(p.sdk.slotPackage + '/')))
-          throw new StuntDoubleError(`[F6] optimizeDeps.include contains ${p.sdk.slotPackage} in "${name}": the override decision would be frozen into .vite/deps. Remove it.`);
+          fail([`[F6] optimizeDeps.include contains ${p.sdk.slotPackage} in "${name}": the override decision would be frozen into .vite/deps. Remove it.`]);
       }
       for (const [k, o] of Object.entries(c.test?.deps?.optimizer ?? {}))
         if (o?.enabled && (o.include ?? []).some((i) => pk.some((n) => i === n || i.startsWith(n + '/'))))
-          throw new StuntDoubleError(`[F6] Vitest deps.optimizer.${k} pre-bundles ${pk.join(', ')} outside the plugin pipeline: overrides would be lost. Remove it from include.`);
+          fail([`[F6] Vitest deps.optimizer.${k} pre-bundles ${pk.join(', ')} outside the plugin pipeline: overrides would be lost. Remove it from include.`]);
       if (p.warnings.length && !warned) { warned = true; c.logger.warn(formatWarnings(p)); }
+      // `vite build`: STA and TYP run HERE, before any bundling, and fail by throwing a StuntDoubleError. Vite
+      // prints it as the bare report (exit 1). The same failure from buildStart would reach the terminal wrapped
+      // in Rolldown's aggregate error and its stack trace.
+      if (command === 'build' && !vitest) {
+        if (p.problems.length) throw new StuntDoubleError(formatProblems(p), p.problems);
+        if (typecheck !== false) {
+          gate ??= runTypeGate(p);
+          const r = await gate;
+          if (!r.ok) throw new StuntDoubleError(r.message, r.lines ?? []);
+        }
+        checkedAtConfig = true;
+      }
     },
 
     // ---- Rollup / Rolldown standalone: no config hook ran ------------------------------------------
-    options(o) {
-      if (p) return null;
-      p = generate({ ...genOpts, root: path.resolve(opts.root ?? process.cwd()), onError: 'return' });
+    options() {
+      if (viteConfigured) return null; // Vite: config() already generated
+      p = load(path.resolve(opts.root ?? process.cwd()), 'return'); // every standalone build regenerates
       return null;
     },
     resolveId(source) {
@@ -112,28 +157,31 @@ export function stuntDouble(opts = {}) {
     // ---- build: STA + TYP ---------------------------------------------------------------------------
     async buildStart() {
       if (command === 'serve' || vitest) return;
-      if (p.problems.length) this.error(formatProblems(p));
+      if (checkedAtConfig) { checkedAtConfig = false; return; } // first build of `vite build`: already checked
+      if (this.meta?.watchMode) { p = load(p.root, 'return'); gate = null; } // `vite build --watch` rebuilds
+      if (p.problems.length) this.error(reportError(formatProblems(p)));
       if (p.warnings.length && !warned) { warned = true; this.warn(formatWarnings(p)); }
       if (typecheck === false) return;
       gate ??= runTypeGate(p);
       const r = await gate;
-      if (!r.ok) this.error(r.message);
+      if (!r.ok) this.error(reportError(r.message));
     },
 
     // ---- build: AUD ---------------------------------------------------------------------------------
     buildEnd(err) {
       if (err || command === 'serve' || vitest || audit === false || !p?.sdk) return;
       const problems = auditGraph(p, rollupGraph(this));
-      if (problems.length) this.error(formatProblems(p, problems));
+      if (problems.length) this.error(reportError(formatProblems(p, problems)));
     },
 
     // ---- dev ----------------------------------------------------------------------------------------
     configureServer(s) {
       let lastError = null;
+      const send = (message) => { try { s.environments.client.hot.send({ type: 'error', err: { message, stack: '', plugin: PLUGIN } }); } catch {} };
       const push = (message) => {
         lastError = message;
         s.config.logger.error(message, { timestamp: true });
-        try { s.environments.client.hot.send({ type: 'error', err: { message, stack: '', plugin: PLUGIN } }); } catch {}
+        send(message);
       };
       const clear = () => {
         if (!lastError) return;
@@ -141,12 +189,13 @@ export function stuntDouble(opts = {}) {
         s.config.logger.info(`${PLUGIN}: injection errors fixed`, { timestamp: true });
         try { s.environments.client.hot.send({ type: 'full-reload', path: '*' }); } catch {}
       };
-      try { s.ws?.on?.('connection', () => { if (lastError) setTimeout(() => { try { s.environments.client.hot.send({ type: 'error', err: { message: lastError, stack: '', plugin: PLUGIN } }); } catch {} }, 50); }); } catch {}
+      try { s.ws?.on?.('connection', () => { if (lastError) setTimeout(() => send(lastError), 50); }); } catch {}
+      let seq = 0;
       const checkTypes = async () => {
         if (typecheck === false || p.problems.length) return;
-        // force: the gate memo is keyed by slot decisions + check file, which an edit INSIDE an override changes
-        // neither of; without it the startup result would be replayed and a new [F1] never reported in dev.
-        const r = await runTypeGate(p, { force: true });
+        const mine = ++seq;
+        const r = await runTypeGate(p);
+        if (mine !== seq) return; // a newer edit started another run: its result wins
         if (!r.ok) push(r.message);
         else clear();
       };
@@ -167,8 +216,8 @@ export function stuntDouble(opts = {}) {
         if (!p.watches(file) && !bypassEdit(file)) return;
         clearTimeout(t);
         t = setTimeout(() => {
-          try { p = regenerate(p, { onError: 'poison' }); } catch (e) { return push(String(e?.message ?? e)); }
-          if (p.problems.length) return push(formatProblems(p));
+          try { p = load(p.root, 'poison'); } catch (e) { return push(String(e?.message ?? e)); }
+          if (p.problems.length) { seq++; return push(formatProblems(p)); }
           clear();
           checkTypes().catch(() => {});
         }, 60);

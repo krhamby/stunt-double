@@ -1,0 +1,25 @@
+name: stunt-double setup
+description: >-
+  Node 22 with the npm cache, the root install (npm ci), and optionally `npm run setup`, which builds every
+  @acme/core variant and packs the tool, the SDK variants and the registry placeholder into .packs/.
+  Every workflow of this repository starts with it (see tests/README.md).
+inputs:
+  pack:
+    description: Also run `npm run setup` (the toolchain suites install their fixtures from .packs/).
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        # the examples' lockfiles too, so fixture installs in the suites hit the npm cache
+        cache-dependency-path: '**/package-lock.json'
+    - name: npm ci (root)
+      shell: bash
+      run: npm ci --no-audit --no-fund
+    - name: npm run setup (build SDK variants, pack .packs/)
+      if: inputs.pack == 'true'
+      shell: bash
+      run: npm run setup
