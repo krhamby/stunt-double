@@ -82,7 +82,9 @@ export default mergeConfig({ ...viteConfig, test: {} }, defineConfig({
 
 ## Which mistakes fail where
 
-Every row was observed in `tests/vitest.test.mjs`.
+`tests/vitest.test.mjs` runs every row (the shared mistake catalogue plus the Vitest-specific cases) against
+`vitest run`, the `globalSetup` gate and `stunt-double check && vitest run`. That plain `vitest run` passes F1 while
+printing `[F1]`, and fails F9c at React runtime, was observed by hand on the versions above.
 
 | # | Mistake | `vitest run` (plugin) | `vitest run` + `globalSetup` gate | `stunt-double check && vitest run` |
 |---|---|---|---|---|

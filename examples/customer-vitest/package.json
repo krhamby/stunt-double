@@ -8,7 +8,8 @@
     "test": "vitest run",
     "test:browser": "vitest run -c vitest.browser.config.ts",
     "typecheck": "tsc -b",
-    "ci": "stunt-double check && vitest run"
+    "ci": "stunt-double check && vitest run",
+    "probe": "node probes/render.mjs"
   },
   "dependencies": {
     "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",

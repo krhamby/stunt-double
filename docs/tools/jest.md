@@ -83,9 +83,11 @@ resolution rather than your tsconfig. Use babel-jest or @swc/jest and keep `stun
 
 ## Which mistakes fail where
 
-`jest` = the plain `jest` command with the wrapper. The first three columns were observed for every row in
-`tests/jest.test.mjs`; in the last column, F2a, F3, F5, F6b and F6h were observed and the other cells follow from
-the same mechanism (no stunt-double code runs).
+`jest` = the plain `jest` command with the wrapper. `tests/jest.test.mjs` runs every row of the shared mistake
+catalogue against `jest` (babel-jest and @swc/jest), `{ typecheck: true }` and `stunt-double check && jest`. The
+plain-`jest` results for F1 and F9c, and the last column for F3, F5 and F6h, were observed by hand on the versions
+above; F2a and F6b in the last column are pinned by the suite's universal-tier block. The remaining cells of the
+last column follow from the same mechanism (no stunt-double code runs).
 
 | # | Mistake | `jest` (wrapper) | `jest`, `{ typecheck: true }` | `stunt-double check && jest` | Universal tier, bare `jest` |
 |---|---|---|---|---|---|
