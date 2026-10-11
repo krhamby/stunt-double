@@ -40,8 +40,10 @@ export const YARN_TS5 = 'patch:typescript@npm%3A5.9.3#optional!builtin<compat/ty
  * tier: 'adapter' (stuntDouble() in vite.config.ts) | 'universal' (no plugin; build = stunt-double check && …, build:bare without)
  * opts.sdk: @acme/core variant tarball version; opts.link: override the dependency spec (null = no line)
  */
+export const projectDir = (name) => path.join(WORK, 'projects', name);
+
 export function makeProject(name, pm, tier, opts = {}) {
-  const dir = path.join(WORK, 'projects', name);
+  const dir = projectDir(name);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const src = path.join(REPO, 'examples/customer-vite');
@@ -49,7 +51,7 @@ export function makeProject(name, pm, tier, opts = {}) {
     fs.cpSync(path.join(src, f), path.join(dir, f), { recursive: true });
   fs.rmSync(path.join(dir, 'src/__tests__'), { recursive: true, force: true });
   const pkg = JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8'));
-  pkg.name = name;
+  pkg.name = name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
   const tgz = (n) => `file:${path.join(PACKS, n)}`;
   pkg.dependencies['@acme/core'] = tgz(`acme-core-${opts.sdk ?? '1.0.0'}.tgz`);
   pkg.devDependencies['stunt-double'] = tgz('stunt-double-0.1.0.tgz');

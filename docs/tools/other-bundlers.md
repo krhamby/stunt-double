@@ -84,7 +84,7 @@ the Node loader above, TypeScript 7.0.2.
 | F2 typo'd or stray file in `src/overrides/` | exit 1, `[F2] … did you mean "Button"?` | **builds; the file is silently unused** |
 | F3 required slot has no implementation | exit 1, `[F3]` | exit 1: the tool cannot resolve the shim's target |
 | F4 two files claim one slot | exit 1, `[F4]` | **builds with the previous decision** |
-| F5 wrong export (default instead of named) | exit 1, `[F5]` | exit 1 in Vite/Rolldown (`MISSING_EXPORT`); depends on the tool (runtime-only in Bun's bundler and Metro) |
+| F5 wrong export (default instead of named) | exit 1, `[F5]` | exit 1 in Vite/Rolldown (`MISSING_EXPORT`) and Node (`does not provide an export named 'PriceTag'`); depends on the tool (runtime-only in Bun's bundler and Metro) |
 | F6g app code imports `@acme/core/original/X` | exit 1, `[F6]` | **builds; that call site renders the SDK default** |
 | F7 override imports its own slot (`import { Button } from '@acme/core'`) | exit 1, `[F7]` | **builds; infinite render at runtime (Node: out of memory)** |
 | Link missing, placeholder installed | exit 1, `[F6] … the registry placeholder` | exit 1, `STUNT-DOUBLE-NOT-WIRED` resolve error |
