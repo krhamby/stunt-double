@@ -1,0 +1,33 @@
+{
+  "name": "customer-rollup",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A project that injects its own components into @acme/core with stunt-double (Rollup 4 + @rollup/plugin-node-resolve 16).",
+  "type": "module",
+  "scripts": {
+    "postinstall": "stunt-double gen --no-fail",
+    "build": "rollup -c",
+    "watch": "rollup -c -w",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "stunt-double check",
+    "probe": "node probes/render.mjs"
+  },
+  "dependencies": {
+    "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
+    "@acme/core-slots": "file:./sdk-slots",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "29.0.3",
+    "@rollup/plugin-node-resolve": "16.0.3",
+    "@rollup/plugin-replace": "6.0.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "rollup": "4.64.5",
+    "rollup-plugin-esbuild": "6.2.1",
+    "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
+    "typescript": "7.0.2"
+  }
+}

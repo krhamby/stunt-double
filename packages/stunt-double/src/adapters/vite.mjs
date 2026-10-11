@@ -27,6 +27,8 @@ export function stuntDouble(opts = {}) {
   let command = 'build';
   let gate = null;
   let warned = false;
+  let standalone = false; // Rollup / Rolldown without Vite: options() generated, no config() hook ran
+  let builds = 0;
   const vitest = !!process.env.VITEST;
   const { typecheck = true, audit = true, ...genOpts } = opts;
 
@@ -93,6 +95,7 @@ export function stuntDouble(opts = {}) {
     // ---- Rollup / Rolldown standalone: no config hook ran ------------------------------------------
     options(o) {
       if (p) return null;
+      standalone = true;
       p = generate({ ...genOpts, root: path.resolve(opts.root ?? process.cwd()), onError: 'return' });
       return null;
     },
@@ -106,9 +109,18 @@ export function stuntDouble(opts = {}) {
     // ---- build: STA + TYP ---------------------------------------------------------------------------
     async buildStart() {
       if (command === 'serve' || vitest) return;
+      const rebuild = builds++ > 0;
+      if (standalone) {
+        // Rollup / Rolldown watch: regenerate on every rebuild, and watch the overrides dir + config, which are
+        // not in the module graph (an added Buton.tsx must trigger a rebuild and fail it).
+        if (rebuild) p = regenerate(p, { onError: 'return' });
+        if (this.meta?.watchMode && p?.sdk) for (const f of [p.overridesDir, p.configFile]) if (f) this.addWatchFile(f);
+      }
       if (p.problems.length) this.error(formatProblems(p));
       if (p.warnings.length && !warned) { warned = true; this.warn(formatWarnings(p)); }
       if (typecheck === false) return;
+      // The gate memo ignores override CONTENTS: a standalone watch rebuild must re-run it.
+      if (standalone && rebuild) gate = runTypeGate(p, { force: true });
       gate ??= runTypeGate(p);
       const r = await gate;
       if (!r.ok) this.error(r.message);

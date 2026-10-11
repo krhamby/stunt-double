@@ -1,0 +1,28 @@
+{
+  "name": "customer-rolldown",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A project that injects its own components into @acme/core with stunt-double (Rolldown 1.2).",
+  "type": "module",
+  "scripts": {
+    "postinstall": "stunt-double gen --no-fail",
+    "build": "rolldown -c",
+    "watch": "rolldown -c -w",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "stunt-double check",
+    "probe": "node probes/render.mjs"
+  },
+  "dependencies": {
+    "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
+    "@acme/core-slots": "file:./sdk-slots",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "rolldown": "1.2.13",
+    "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
+    "typescript": "7.0.2"
+  }
+}

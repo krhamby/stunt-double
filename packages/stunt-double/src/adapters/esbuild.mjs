@@ -44,13 +44,15 @@ export function stuntDoubleEsbuild(opts = {}) {
       let first = true;
 
       build.onStart(async () => {
-        if (!first && p) gen(p); // context.rebuild() / watch: pick up added, removed or renamed overrides
+        const rebuild = !first;
+        if (rebuild && p) gen(p); // context.rebuild() / watch: pick up added, removed or renamed overrides
         first = false;
         if (fatal) return { errors: [msg(`${PLUGIN}: ${fatal}`)] };
         const warnings = p.warnings.length ? [msg(formatWarnings(p))] : [];
         if (p.problems.length) return { errors: [msg(formatProblems(p))], warnings };
         if (typecheck !== false) {
-          const r = await runTypeGate(p);
+          // The gate memo is keyed on decisions + check-file text, not on override CONTENTS: force it on rebuilds.
+          const r = await runTypeGate(p, { force: rebuild });
           if (!r.ok) return { errors: [msg(r.message)], warnings };
         }
         return { warnings };
