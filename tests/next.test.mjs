@@ -469,7 +469,8 @@ describe('next dev', () => {
       assert.ok(!(await until(port, '/legacy', (r) => r.status === 500)).timedOut);
       app.rm('src/overrides/Buton.tsx');
       const stuck = await until(port, '/', (r) => r.status === 200, 8000);
-      assert.ok(stuck.timedOut && /STUNT-DOUBLE-ERROR/.test(stuck.text), `App Router recovered on its own (HTTP ${stuck.status}): Next fixed the gap`);
+      assert.ok(stuck.timedOut, `App Router recovered on its own (HTTP ${stuck.status}): Next fixed the gap`);
+      assert.match(stuck.text, /\[F2\][^<]{0,60}Buton|STUNT-DOUBLE-ERROR -- \[F2\]/, 'the stale 500 is the old [F2] report');
       assert.ok(!(await until(port, '/legacy', (r) => r.status === 200)).timedOut, 'requesting the Pages Router route recompiles it');
       assert.ok(!(await until(port, '/', has('BRAND_BUTTON'))).timedOut, 'and the App Router route recovers');
     } finally { await srv.stop(); }
