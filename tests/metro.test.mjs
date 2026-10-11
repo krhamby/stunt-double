@@ -5,7 +5,10 @@
 // Three ways to bundle the same project, for every mistake in the F1-F9 catalogue:
 //   adapter  metro build with metro.config.js = withStuntDouble(getDefaultConfig(__dirname))   (T1)
 //   check    stunt-double check                                                                 (the CI gate)
-//   bare     metro build with the SAME config minus withStuntDouble(): the npm link only        (T0 bare)
+//   bare     metro build with the SAME config minus withStuntDouble(), with node_modules/@acme/core-slots
+//            linked to sdk-slots/ INSIDE THE TEST WORKSPACE (the universal tier, T0 bare)
+// The example itself depends on the registry placeholder (a tarball standing in for what npm auto-installs for
+// the SDK's peer): adapter cells prove the adapter needs no link.
 // "bare" rows record what Metro does natively, so the docs table can say exactly where a mistake surfaces.
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,8 +59,13 @@ const restoreProject = () => {
   fs.rmSync(path.join(work, 'src'), { recursive: true, force: true });
   fs.cpSync(path.join(example, 'src'), path.join(work, 'src'), { recursive: true, filter: (s) => !s.endsWith('stunt-double.check.ts') });
 };
+// As installed: baseline SDK + the registry placeholder answering @acme/core-slots.
 const restoreInstall = () => {
   extract(tgz('acme-core-1.0.0.tgz'), sdkDir());
+  extract(tgz('acme-core-slots-0.0.1.tgz'), slotsLink());
+};
+// Universal tier (test workspace only): link the slot package to the generated sdk-slots/.
+const linkSlots = () => {
   fs.rmSync(slotsLink(), { recursive: true, force: true });
   fs.symlinkSync(path.relative(path.dirname(slotsLink()), path.join(work, 'sdk-slots')), slotsLink(), 'junction');
 };
@@ -78,7 +86,8 @@ before(() => {
   edit('package.json', (s) => s.replaceAll('../../.packs/', packs.split(path.sep).join('/') + '/'));
   const r = sh('npm', ['install', '--no-package-lock', '--no-audit', '--no-fund'], { shell: process.platform === 'win32', timeout: 600_000 });
   assert.equal(r.code, 0, `npm install failed:\n${r.out}`);
-  // T0 bare: the same config without the wrapper (resolution goes through the npm link sdk-slots/ only).
+  assert.ok(fs.existsSync(path.join(slotsLink(), 'not-wired.js')), 'the example installs the registry placeholder');
+  // T0 bare: the same config without the wrapper (resolution goes through the sdk-slots/ link only).
   write('metro.bare.config.js', fs.readFileSync(path.join(work, 'metro.config.js'), 'utf8')
     .replace(/^const \{ withStuntDouble \}.*\n/m, '')
     .replace(/module\.exports = withStuntDouble\((.*)\);/, 'module.exports = $1;'));
@@ -109,8 +118,8 @@ describe('positive', () => {
     assert.deepEqual(j.platforms, ['android', 'ios']);
   });
 
-  test('adapter: metro build renders the overrides app-level and inside the SDK <Checkout>', () => {
-    restoreProject();
+  test('adapter: metro build renders the overrides app-level and inside the SDK <Checkout> (placeholder installed, no link)', () => {
+    restoreInstall(); restoreProject();
     const r = build();
     assert.equal(r.code, 0, r.out);
     const s = render();
@@ -133,8 +142,8 @@ describe('positive', () => {
     assert.ok(fs.existsSync(path.join(work, 'sdk-slots/gen/tsconfig.check.json')), 'the type gate wrote its tsconfig');
   });
 
-  test('T0 bare: Metro follows the npm link (sdk-slots) natively and renders the same', () => {
-    restoreProject();
+  test('T0 bare: Metro follows the sdk-slots link natively and renders the same', () => {
+    restoreProject(); linkSlots();
     assert.equal(cli('gen').code, 0);
     const r = build('metro.bare.config.js');
     assert.equal(r.code, 0, r.out);
@@ -195,9 +204,10 @@ const MUTATIONS = [
   },
   {
     id: 'F6b', title: 'unwired: the registry placeholder answers @acme/core-slots',
-    apply: () => extract(tgz('acme-core-slots-0.0.1.tgz'), slotsLink()),
-    // with the adapter, the socket never reaches the placeholder; the wiring self-test still refuses the install
-    adapter: /\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(the registry placeholder/, check: /\[F6\]/,
+    apply: () => {}, // the as-installed state: the placeholder, no link
+    bareLink: false,
+    // not a mistake for the adapter: the socket never reaches the placeholder (adapter-only project)
+    adapter: 'pass', check: 'pass',
     bare: { build: /Unable to resolve module \.\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/ },
   },
   {
@@ -229,15 +239,17 @@ describe('mutations', () => {
       before(() => { restoreInstall(); restoreProject(); assert.equal(cli('gen').code, 0, 'baseline gen'); m.apply(); });
       after(() => { restoreInstall(); restoreProject(); });
 
-      test('adapter: metro build exits non-zero with the [Fx] line', () => {
+      test(m.adapter === 'pass' ? 'adapter: metro build passes and renders the overrides' : 'adapter: metro build exits non-zero with the [Fx] line', () => {
         const r = build();
+        if (m.adapter === 'pass') { assert.equal(r.code, 0, r.out.slice(-2000)); assert.deepEqual(compareRender(render(), GOOD), []); return; }
         assert.notEqual(r.code, 0, `metro build passed:\n${r.out.slice(-2000)}`);
         assert.match(r.out, m.adapter);
         assert.ok(!fs.existsSync(path.join(work, 'dist/main.js')), 'no bundle was written');
       });
 
-      test('stunt-double check exits non-zero', () => {
+      test(m.check === 'pass' ? 'stunt-double check passes' : 'stunt-double check exits non-zero', () => {
         const r = cli('check');
+        if (m.check === 'pass') { assert.equal(r.code, 0, r.out); return; }
         assert.notEqual(r.code, 0, r.out);
         assert.match(r.out, m.check);
       });
@@ -245,6 +257,7 @@ describe('mutations', () => {
       test(`T0 bare (no adapter): ${m.bare.build ? 'fails at resolve time' : m.bare.crash ? 'bundles, then crashes at RUNTIME' : 'bundles silently'}`, () => {
         // the adapter test above may have poisoned nothing (throw mode) but re-generation is part of the mutation
         // for F3: bare Metro sees the shims of the last successful gen, exactly like a CI without the chain.
+        if (m.bareLink !== false) linkSlots();
         const r = build('metro.bare.config.js');
         if (m.bare.build) {
           assert.notEqual(r.code, 0, r.out.slice(-2000));

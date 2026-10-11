@@ -10,11 +10,7 @@ const { withStuntDouble } = require('stunt-double/metro');
 module.exports = withStuntDouble(getDefaultConfig(__dirname));
 ```
 
-Keep the usual project-side setup from `npx stunt-double init`:
-
-- the `"@acme/core-slots": "file:./sdk-slots"` link;
-- the tsconfig `paths` entry and the check file listed in `files`;
-- `"postinstall": "stunt-double gen --no-fail"`.
+The adapter needs no `@acme/core-slots` link: it answers every socket itself, even while npm's auto-installed registry placeholder sits in `node_modules`. For now, keep the tsconfig `paths` entry and the check file in `files` from `npx stunt-double init` for the type gate.
 
 CI runs `npx stunt-double check`. A working example is in [`examples/customer-metro`](../../examples/customer-metro).
 
@@ -54,7 +50,8 @@ Other options:
 
 - metro 0.87.1 and @react-native/metro-config 0.87.1 (with its default @react-native/metro-babel-transformer).
 - node 22.22.0, TypeScript 7.0.2, react / react-dom 19.3.0.
-- Package `exports` resolution (`unstable_enablePackageExports`, default `true` in Metro 0.87) resolves `@acme/core/original/*` and the `sdk-slots` link (`exports "./*"`). Metro follows the npm `file:` symlink natively.
+- Package `exports` resolution (`unstable_enablePackageExports`, default `true` in Metro 0.87) resolves `@acme/core/original/*`, and, in the universal tier, the linked slot package's `exports "./*"`. Metro follows the symlink natively.
+- The generated files can live in a dot directory (`.stunt-double/gen`): `metro build` resolves, transforms and indexes them, and `metro serve` picks up rewrites live. No `watchFolders` or `blockList` change is needed.
 - **Expo:** manually checked once, and not part of the test suite (the install is 265 MB):
   - expo 57.0.27 with `expo/metro-config` (@expo/metro-config 57.0.13) **pins metro 0.84.5, not 0.87**;
   - `withStuntDouble(getDefaultConfig(__dirname))` composes with Expo's config, including its `customSerializer`;
@@ -68,7 +65,7 @@ Other options:
 Every row was observed by `tests/metro.test.mjs`.
 
 - **Adapter:** `metro build` using `withStuntDouble`.
-- **Bare:** the same config without the wrapper, so only the npm link and no stunt-double code (T0).
+- **Bare:** the same config without the wrapper, with `@acme/core-slots` linked to the generated package, so no stunt-double code runs (universal tier, no `stunt-double check &&`).
 
 | # | Mistake | Adapter (`metro build`) | `stunt-double check` | Bare Metro (no adapter, no chain) |
 |---|---|---|---|---|
@@ -78,7 +75,7 @@ Every row was observed by `tests/metro.test.mjs`.
 | F4 | `Button.tsx` and `Button/index.tsx` | exit 1 at config load | exit 1 | **silent**: the previous shim decides |
 | F5 | Default export instead of named | exit 1 at config load (STA) | exit 1 | **runtime**: bundles, then React error #130 (element type undefined). Metro does not check named imports |
 | F6a | SDK imports `./original/Button.js` (variant `1.0.0-bad-relative`) | exit 1 at config load (dist scan) | exit 1 | **silent**: the SDK default renders inside `Checkout` |
-| F6b | Unwired: the registry placeholder answers `@acme/core-slots` | exit 1 at config load (wiring self-test) | exit 1 | exit 1: `Unable to resolve module ./STUNT-DOUBLE-NOT-WIRED -- …` |
+| F6b | Unwired: no adapter and no link, so the registry placeholder answers `@acme/core-slots` | not a mistake: builds and renders correctly with the placeholder installed | passes | exit 1: `Unable to resolve module ./STUNT-DOUBLE-NOT-WIRED -- …` |
 | F6g | App imports `@acme/core/original/Button` | exit 1 at config load | exit 1 | **silent**: the default renders at that call site |
 | F6 (alias) | A resolver placed in front of the adapter sends a socket elsewhere | bundle fails (serializer-hook audit) | passes (nothing static to see) | silent |
 | F7 | Override imports its own slot | exit 1 at config load | exit 1 | **runtime**: infinite render until out of memory |
