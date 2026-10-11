@@ -49,11 +49,11 @@ SDK barrel and render `<Checkout>` while your hook-using override runs on the cl
 
 | When | What |
 |---|---|
-| Config load (`next build`, `next dev`) | Validates the overrides and writes the shims. **Any injection mistake throws**, so the command exits 1 before compiling. Refuses `typescript.ignoreBuildErrors` (`[X1]`) and a tsconfig that does not include `src/stunt-double.check.ts` (`[X2]`) |
+| Config load (`next build`, `next dev`) | Validates the overrides and writes the shims. **Any injection mistake throws**, so the command exits 1 before compiling |
 | `transpilePackages` | Adds the SDK (and brand layers). Without it the Pages Router would load `@acme/core` natively in Node, where slots cannot be redirected |
 | Turbopack | One `turbopack.resolveAlias` entry: `'@acme/core-slots/*': './sdk-slots/gen/*.jsx'`. The target is relative on purpose: Turbopack silently ignores absolute targets |
 | webpack (`--webpack`) | Exact aliases to the shims, `exportsPresence: 'error'`, the decision fingerprint folded into the persistent cache version, and a post-bundle audit (bypassed sockets, duplicate SDK) reported as a build error |
-| Type gate | Nothing extra: `next build` type-checks the whole tsconfig program, which includes the generated check file |
+| Type gate (`next build` only) | `compiler.runAfterProductionCompile` runs the slot contract check on both bundlers; a failure fails the build with `[F1]` / `[F9]` lines. Your own `runAfterProductionCompile` still runs first. `typescript.ignoreBuildErrors` does not switch it off |
 
 If you set `typescript.tsconfigPath`, the wrapper checks that file instead of `tsconfig.json`.
 
@@ -75,7 +75,7 @@ hydration warnings and the SDK's own buttons are interactive.
 
 | # | Mistake | `next build` (Turbopack) | `next build --webpack` | `stunt-double watch -- next dev` |
 |---|---|---|---|---|
-| F1a/b | Override doesn't fit the contract / ignores SDK props | Exit 1, "Failed to type check" (TS2322 in `src/stunt-double.check.ts`) | same | Not reported (IDE squiggle; `next dev` does not type-check) |
+| F1a/b | Override doesn't fit the contract / ignores SDK props | Type gate: exit 1, `[F1] Button (src/overrides/Button.tsx): TS2322 …` | same | Not reported (IDE squiggle; `next dev` does not type-check) |
 | F2 | Typo or stray file in `src/overrides` | Config load | Config load | HTTP 500 + overlay with the poison text; clears on fix |
 | F3 | Required slot missing | Config load | Config load | HTTP 500 + overlay |
 | F4 | Slot claimed twice | Config load | Config load | HTTP 500 + overlay |
@@ -86,16 +86,17 @@ hydration warnings and the SDK's own buttons are interactive.
 | F9a | Hook-using override without `"use client"` | Renders (the shim carries the directive) | same | same |
 | F9a′ | Shim directive switched off (`"rsc": false`) | Exit 1 natively at prerender ("Attempted to call useTheme() from the server") | same | |
 | F9b | `server-only` imported by a client-slot override (directly or via a helper) | Config load | Config load | HTTP 500 + overlay |
-| F9c | Async override in a client slot | Exit 1, TS2322 `[F9] client slot override must not be an async component` | same | Not reported (IDE) |
-| X1 | `typescript.ignoreBuildErrors: true` | Config load | Config load | Config load |
-| X2 | tsconfig does not include the check file | Config load | Config load | Config load |
+| F9c | Async override in a client slot | Type gate: exit 1, `[F9] Logo (src/overrides/Logo.tsx): client slot override must not be an async component` | same | Not reported (IDE) |
+| X1 | `typescript.ignoreBuildErrors: true` | Allowed: the type gate still runs (F1 still fails the build) | same | |
+| X2 | App tsconfig does not include the check file | Allowed: the type gate has its own program | same | |
 | — | TS 7 with `experimental.useTypeScriptCli: false` | Exit 1 natively ("TypeScript 7.0.2 does not provide the compiler API…") | same | |
 
 A mistake present when `next dev` starts fails startup (exit 1). Mistakes made while it runs show up as Next's own
 "Module not found: Can't resolve './STUNT-DOUBLE-ERROR -- [F2] …'" overlay and an HTTP 500.
 
-Type errors are printed by Next as raw `tsc` lines pointing into `src/stunt-double.check.ts`; open that line to see
-which slot and override it is about. `npx stunt-double check` prints the same failure with `[F1]` labels.
+Next prints the type gate's failure as `Failed to run runAfterProductionCompile: stunt-double: 1 injection error …`
+followed by the `[Fx]` lines. The gate runs after Next has compiled (Next has no earlier async build hook), so a
+contract mistake costs one compile; `npx stunt-double check` gives the same answer in about a second.
 
 ## Dev server
 
