@@ -10,6 +10,12 @@ import { readJson, real, sha, findPackageJson } from './util.mjs';
 export const TOOL_VERSION = readJson(fileURLToPath(new URL('../../package.json', import.meta.url))).version;
 export const MANIFEST_FILE = 'slot-manifest.json';
 const SLOT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Component slots (client | shared | server) are checked against SlotProps; value slots against SlotTypes. */
+export const COMPONENT_KINDS = Object.freeze(['client', 'shared', 'server']);
+export const SLOT_KINDS = Object.freeze([...COMPONENT_KINDS, 'value']);
+/** A slot's kind (the manifest default is "client"). */
+export const kindOf = (meta) => meta?.kind ?? 'client';
+export const isValueSlot = (meta) => kindOf(meta) === 'value';
 
 function resolveManifest(name, root) {
   const req = createRequire(path.join(root, 'package.json'));
@@ -95,10 +101,18 @@ export function loadSdk(root, cfg) {
     exportOf(slot) {
       return slots[slot]?.export ?? slot;
     },
+    kindOf(slot) {
+      return kindOf(slots[slot]);
+    },
+    isValue(slot) {
+      return isValueSlot(slots[slot]);
+    },
   };
   if (sdk.name !== name) problems.push(`[SETUP] ${name}/${MANIFEST_FILE} declares "sdk": "${sdk.name}" but was installed as ${name}.`);
   for (const s of sdk.slotNames) {
     const meta = slots[s];
+    // fail closed: a kind this version does not know would be checked against the wrong contract
+    if (!SLOT_KINDS.includes(kindOf(meta))) problems.push(`[SETUP] ${name}@${sdk.version} slot "${s}" has kind ${JSON.stringify(meta.kind)}, which stunt-double ${TOOL_VERSION} does not understand (known: ${SLOT_KINDS.join(', ')}). Upgrade stunt-double.`);
     if (!meta.required && !meta.default) problems.push(`[SETUP] ${name}@${sdk.version} slot "${s}" has neither a default nor "required": true (SDK bug; sdk-lint rejects this).`);
     if (meta.default && !fs.existsSync(path.join(dir, meta.default))) problems.push(`[SETUP] ${name}@${sdk.version} slot "${s}" default ${meta.default} is missing from the installed package.`);
   }

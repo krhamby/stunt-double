@@ -45,9 +45,16 @@ export interface GenerateOptions extends StuntDoubleConfig {
   configFile?: string;
 }
 
+/**
+ * client | shared | server: a React component, checked against SlotProps[slot] (its props).
+ * value: anything else (a service, client, function, hook, class or config object), checked against SlotTypes[slot].
+ */
+export type SlotKind = 'client' | 'shared' | 'server' | 'value';
+
 export interface SlotMeta {
   export?: string;
-  kind?: 'client' | 'shared' | 'server';
+  /** Default "client". */
+  kind?: SlotKind;
   default?: string;
   required?: boolean;
   consumers?: string[];
@@ -83,6 +90,9 @@ export interface Sdk {
   removedSlots: Record<string, string>;
   defaultFile(slot: string): string | null;
   exportOf(slot: string): string;
+  kindOf(slot: string): SlotKind;
+  /** The slot is a value slot (kind "value"), not a component. */
+  isValue(slot: string): boolean;
 }
 
 export interface Layer {
@@ -106,7 +116,7 @@ export interface Implementation {
 
 export interface SlotEntry {
   slot: string;
-  kind: 'client' | 'shared' | 'server';
+  kind: SlotKind;
   required: boolean;
   exportName: string;
   /** [app claim?, layer impls (last listed first)?, SDK default?] */
@@ -254,6 +264,8 @@ export declare function publishedDtsFiles(pkgDir: string, pkg: any): string[];
 export declare function contractsDts(pkgDir: string, pkg: any): string | null;
 export declare function abiOf(manifest: SlotManifest, contractsText: string, slotPackage: string, version: string): string;
 export declare function contractSlots(contractsDts: string): string[] | null;
+/** Property names of the interface (or type literal) `name` (e.g. "SlotProps", "SlotTypes") in a contracts .d.ts. */
+export declare function contractKeys(contractsDts: string, name: string): string[] | null;
 export declare function schemaFor(manifest: SlotManifest): object;
 
 export declare const DEFAULTS: Readonly<Required<StuntDoubleConfig>>;
@@ -261,6 +273,10 @@ export declare const CONFIG_FILE: 'stunt-double.config.json';
 export declare const PACKAGE_KEY: 'stuntDouble';
 export declare const TOOL_VERSION: string;
 export declare const MANIFEST_FILE: 'slot-manifest.json';
+export declare const SLOT_KINDS: readonly SlotKind[];
+export declare const COMPONENT_KINDS: readonly ('client' | 'shared' | 'server')[];
+export declare function kindOf(meta: SlotMeta | undefined): SlotKind;
+export declare function isValueSlot(meta: SlotMeta | undefined): boolean;
 export declare function loadConfig(root: string, overrides?: Partial<GenerateOptions>): { cfg: Required<StuntDoubleConfig>; configFile: string | null; configSource: string; problems: string[] };
 export declare function detectPackageManager(root: string): string;
 export declare function detectPnP(root: string): boolean;

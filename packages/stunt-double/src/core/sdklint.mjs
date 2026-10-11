@@ -10,6 +10,7 @@ import { parseModule } from './parse.mjs';
 import { DEFAULTS } from './config.mjs';
 import { rewriteSocketDts, publishedDtsFiles, socketMentions } from './sdkdts.mjs';
 import { readJson, real, sha, posix, fileExists } from './util.mjs';
+import { SLOT_KINDS, kindOf } from './manifest.mjs';
 
 function findPackageDir(start) {
   for (let d = path.resolve(start); ; d = path.dirname(d)) {
@@ -18,18 +19,23 @@ function findPackageDir(start) {
   }
 }
 
-/** Property names of `SlotProps` in contracts.d.ts (interface or type literal). */
-export function contractSlots(file) {
+/** Property names of the interface (or type literal) `name` in a contracts.d.ts, or null if it is not declared. */
+export function contractKeys(file, name) {
   const src = fs.readFileSync(file, 'utf8');
   const { program } = parseSync(file, src, { lang: 'dts' });
   for (const st of program.body) {
     const d = st.type === 'ExportNamedDeclaration' ? st.declaration : st;
     if (!d) continue;
-    if (d.type === 'TSInterfaceDeclaration' && d.id.name === 'SlotProps') return d.body.body.map((m) => m.key?.name ?? m.key?.value).filter(Boolean);
-    if (d.type === 'TSTypeAliasDeclaration' && d.id.name === 'SlotProps' && d.typeAnnotation.type === 'TSTypeLiteral')
+    if (d.type === 'TSInterfaceDeclaration' && d.id.name === name) return d.body.body.map((m) => m.key?.name ?? m.key?.value).filter(Boolean);
+    if (d.type === 'TSTypeAliasDeclaration' && d.id.name === name && d.typeAnnotation.type === 'TSTypeLiteral')
       return d.typeAnnotation.members.map((m) => m.key?.name ?? m.key?.value).filter(Boolean);
   }
   return null;
+}
+
+/** Property names of `SlotProps` (component slot contracts) in contracts.d.ts. */
+export function contractSlots(file) {
+  return contractKeys(file, 'SlotProps');
 }
 
 function entryFile(pkgDir, pkg) {
@@ -129,7 +135,7 @@ export function sdkLint(start = process.cwd(), { write = false, fix = false } = 
     if (m.required && m.default) errors.push(`[SDK5] slot "${s}" is required AND has a default (${m.default}): pick one`);
     if (!m.required && !m.default) errors.push(`[SDK5] slot "${s}" has no default and is not required`);
     if (m.default && !fileExists(path.join(pkgDir, m.default))) errors.push(`[SDK5] slot "${s}" default ${m.default} does not exist (build first)`);
-    if (!['client', 'shared', 'server', undefined].includes(m.kind)) errors.push(`[SDK] slot "${s}" kind must be client, shared or server`);
+    if (!SLOT_KINDS.includes(kindOf(m))) errors.push(`[SDK] slot "${s}" kind must be one of ${SLOT_KINDS.join(', ')} (client, shared and server are components; value is anything else)`);
   }
   // rule 1 (+ unknown sockets, rule 2a): the shared dist scanner
   const dist = scanDist({ sdk, pkgDir, rel });
@@ -138,14 +144,27 @@ export function sdkLint(start = process.cwd(), { write = false, fix = false } = 
   // rule 2b + 3: contracts
   const contracts = ['dist/contracts.d.ts', 'contracts.d.ts'].map((f) => path.join(pkgDir, f)).find(fileExists);
   let contractsText = '';
-  if (!contracts) errors.push(`[SDK2] no contracts.d.ts (dist/contracts.d.ts) with "export interface SlotProps"`);
+  const valueSlots = slotNames.filter((s) => kindOf(slots[s]) === 'value');
+  const componentSlots = slotNames.filter((s) => kindOf(slots[s]) !== 'value');
+  if (!contracts) errors.push(`[SDK2] no contracts.d.ts (dist/contracts.d.ts) with "export interface SlotProps"${valueSlots.length ? ' and "export interface SlotTypes"' : ''}`);
   else {
     contractsText = fs.readFileSync(contracts, 'utf8');
-    const keys = contractSlots(contracts);
-    if (!keys) errors.push(`[SDK2] ${rel(contracts)} does not export SlotProps`);
-    else {
-      for (const s of slotNames) if (!keys.includes(s)) errors.push(`[SDK2] slot "${s}" has no SlotProps entry in ${rel(contracts)}`);
-      for (const k of keys) if (!slots[k]) errors.push(`[SDK2] SlotProps["${k}"] in ${rel(contracts)} is not a slot in slot-manifest.json`);
+    // component slots are typed by their props (SlotProps), value slots by their whole type (SlotTypes)
+    const sides = [
+      { iface: 'SlotProps', own: componentSlots, what: 'component', other: 'SlotTypes' },
+      { iface: 'SlotTypes', own: valueSlots, what: 'value', other: 'SlotProps' },
+    ];
+    for (const { iface, own, what, other } of sides) {
+      const keys = contractKeys(contracts, iface);
+      if (!keys) {
+        if (own.length) errors.push(`[SDK2] ${rel(contracts)} does not export ${iface}, which types the ${what} slot${own.length > 1 ? 's' : ''} ${own.join(', ')}`);
+        continue;
+      }
+      for (const s of own) if (!keys.includes(s)) errors.push(`[SDK2] ${what} slot "${s}" has no ${iface} entry in ${rel(contracts)}`);
+      for (const k of keys) {
+        if (!slots[k]) errors.push(`[SDK2] ${iface}["${k}"] in ${rel(contracts)} is not a slot in slot-manifest.json`);
+        else if (!own.includes(k)) errors.push(`[SDK2] ${iface}["${k}"] in ${rel(contracts)}: "${k}" is a ${kindOf(slots[k]) === 'value' ? 'value' : 'component'} slot, so its contract belongs in ${other}`);
+      }
     }
     for (const e of parseModule(contracts).edges)
       if (e.spec === slotPackage || e.spec.startsWith(slotPackage + '/'))

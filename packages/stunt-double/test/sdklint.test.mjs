@@ -48,7 +48,7 @@ describe('sdk-lint', () => {
     const dir = sdk({ files: { 'dist/Extra.js': `'use client';\nimport { Nope } from '@acme/core-slots/Nope';\nexport const E = Nope;\n` } });
     assert.match(errors(dir), /\[SDK2\] dist\/Extra\.js imports socket "@acme\/core-slots\/Nope", which is not in slot-manifest\.json/);
     const dir2 = sdk({ files: { 'dist/contracts.d.ts': `export interface SlotProps { Button: {}; Logo: {} }\nexport type SlotAbi = 'x';\n` } });
-    assert.match(errors(dir2), /\[SDK2\] slot "Card" has no SlotProps entry/);
+    assert.match(errors(dir2), /\[SDK2\] component slot "Card" has no SlotProps entry/);
   });
 
   test('SDK3: contracts import props through the socket package', () => {
