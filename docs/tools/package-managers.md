@@ -112,8 +112,14 @@ in app code and inside the SDK's `<Checkout>`, with the app's own theme context 
 `npm create vite@9.2.1 -- --template react-ts` app, `stunt-double init --plugin` and then `init --universal`
 gave a building project under all four package managers.
 
-The test suites are `tests/package-managers.test.mjs`, `tests/pm-wiring.test.mjs`, `tests/pm-init.test.mjs` and
-`tests/typescript-matrix.test.mjs`.
+The whole shared mistake catalogue (`tests/mutations/`: 30 mistakes plus the Vite-family ones, the TypeScript
+5.9 type gate and the universal tier) runs against that app under every package manager: `tests/vite.test.mjs`
+(npm), `tests/pnpm.test.mjs`, `tests/yarn.test.mjs` and `tests/bun.test.mjs`. Every mistake fails the build with
+its `[Fx]` code under all four, with two Yarn differences: the nested-React mistake cannot occur (below), and
+plain Node reports the placeholder through PnP's resolver (`Qualified path resolution failed … STUNT-DOUBLE-NOT-WIRED`)
+instead of `ERR_MODULE_NOT_FOUND`. `tests/package-managers.test.mjs` pins the bare universal-tier column below,
+`tests/pm-wiring.test.mjs` the wiring mistakes, `tests/pm-init.test.mjs` the `init` runs and
+`tests/typescript-matrix.test.mjs` the contract cases.
 
 ## Which mistakes fail where
 
