@@ -1,9 +1,9 @@
 import type { Analytics } from '@acme/core';
 
 /**
- * Stunt double for the "analytics" VALUE slot: a service object, the Swinject-style registration of a protocol
- * implementation. Every event the SDK reports (ProductCard's add_to_cart, ...) lands here instead of the SDK's
- * no-op default, which is then absent from the bundle.
+ * Override for the "analytics" VALUE slot: a service object implementing the SDK's Analytics interface. Every
+ * event the SDK reports (ProductCard's add_to_cart, ...) lands here instead of the SDK's no-op default, which is
+ * then absent from the bundle.
  */
 class BrandAnalytics implements Analytics {
   readonly id = 'BRAND_ANALYTICS';

@@ -164,7 +164,7 @@ B's other structural choices are also kept:
 
 ## 8. Value slots (after the first milestone)
 
-The north star is about *injection* mistakes, and an SDK injects more than components: analytics, API clients, formatters, feature configuration. Runtime DI containers such as Swinject register any type. The first milestone only checked components, so everything else still needed a runtime registry, which is exactly the failure mode this project removes.
+The north star is about *injection* mistakes, and an SDK injects more than components: analytics, API clients, formatters, feature configuration. Runtime DI containers such as InversifyJS or tsyringe register any type. The first milestone only checked components, so everything else still needed a runtime registry, which is exactly the failure mode this project removes.
 
 **Decision: a fourth slot kind, `value`, on the same mechanism.** Sockets, shims, the alias, the placeholder, the dist scan, the audit and every adapter are kind-agnostic: a shim re-exports a binding, whatever it is. Only the contract changes: `SlotTypes['X']` (the whole type) instead of `SlotProps['X']` (props). Kinds a tool version does not know fail generation (`[SETUP]`), so an older stunt-double can never check a new kind against the wrong contract.
 

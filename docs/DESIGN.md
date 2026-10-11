@@ -7,7 +7,7 @@
 | Package | `stunt-double` v0.1.0 (MIT). One npm package: the CLI plus subpath exports `stunt-double/core`, `/vite`, `/esbuild`, `/webpack`, `/next`, `/jest`, `/metro`, `/parcel`, `/bun` |
 | Example SDK | `@acme/core`, the company's product SDK. Its socket package is `@acme/core-slots` |
 | Companion docs | [DECISIONS.md](DECISIONS.md): why this design and not the others, and the open questions. [README](../README.md): quickstart |
-| Audience | React + TypeScript engineers who know runtime DI (Swinject, a React context registry) and want the same flexibility with build-time failures |
+| Audience | React + TypeScript engineers who know runtime DI (InversifyJS, tsyringe, a React context registry) and want the same flexibility with build-time failures |
 
 ## Contents
 
@@ -38,7 +38,7 @@
 - **eliminate the default**: if the project replaces `Button` outright, the SDK's default `Button` should not be in the bundle at all;
 - **allow wrapping**: an override can wrap the SDK default (add a class, read the app theme) without creating an import cycle.
 
-At work you would do this with Swinject: register an implementation in a container, then resolve it where it is needed. The weakness of runtime DI is *when* it reports mistakes. A missing registration, a typo'd key, or an implementation of the wrong type shows up only when `resolve()` runs, which means in a running app, usually as a crash.
+With runtime DI (InversifyJS, tsyringe, or a React context that hands components down) you register an implementation in a container, then resolve it where it is needed. The weakness of runtime DI is *when* it reports mistakes. A missing registration, a typo'd key, or an implementation of the wrong type shows up only when `resolve()` runs, which means in a running app, usually as a crash.
 
 **The north star is "build failures rather than runtime failures".** Every injection mistake must either:
 
@@ -62,18 +62,18 @@ The code uses plain names throughout:
 | **original** | the SDK default implementation of a slot: `@acme/core/original/Button` |
 | **contract** | the props type every implementation of a slot must accept: `SlotProps['Button']` |
 
-### 1.3 Swinject mapped to stunt-double
+### 1.3 Runtime DI mapped to stunt-double
 
-| Swinject (runtime) | stunt-double (build time) |
+| Runtime DI (InversifyJS, tsyringe, React context) | stunt-double (build time) |
 |---|---|
-| `container.register(Button.self) {…}` | the file `src/overrides/Button.tsx` |
-| `container.register(Analytics.self) {…}`: any type, not only views | the file `src/overrides/analytics.ts`, a **value slot** (§6.6) |
-| the protocol a registration must conform to | the contract `SlotProps['Button']` (a component) or `SlotTypes['analytics']` (a value) from `@acme/core/contracts` |
-| container scope (one shared instance) | the default: an ES module is evaluated once per bundle |
+| `<SlotsProvider components={{ Button: BrandButton }}>` | the file `src/overrides/Button.tsx` |
+| `container.register('Analytics', { useClass: BrandAnalytics })`: any type, not only components | the file `src/overrides/analytics.ts`, a **value slot** (§6.6) |
+| the interface or token a registration is typed against | the contract `SlotProps['Button']` (a component) or `SlotTypes['analytics']` (a value) from `@acme/core/contracts` |
+| singleton scope (one shared instance) | the default: an ES module is evaluated once per bundle |
 | transient scope, or registration with runtime arguments | a value slot whose value is a factory: `createClient(options)` |
-| `resolve()` | a static `import`: the SDK imports `@acme/core-slots/Button` |
+| `container.resolve()` / `useContext()` | a static `import`: the SDK imports `@acme/core-slots/Button` |
 | the container's registration table | one generated shim per slot in `.stunt-double/gen/`, reached through one static alias (or, in the universal tier, a linked package) |
-| parent-container fallback | the effective order: app override, then optional brand layers, then the SDK default (§5.5) |
+| child-container fallback to the parent | the effective order: app override, then optional brand layers, then the SDK default (§5.5) |
 | a wrong registration, a missing registration, or a type mismatch crashes at runtime | a non-zero exit from `vite build` / `next build` / `webpack` / `tsc`, or an overlay in the dev server, with an `[Fx]` message that names the file and the fix |
 
 ### 1.4 How it works, in 30 seconds
@@ -906,7 +906,7 @@ Verified in TypeScript 7.0.2 and 5.9.3, strict on and off [S]:
 
 **Messages.** F7 for a value slot is a circular import that reads the slot before it is initialized, not an infinite render. W7 warns that an override importing an SDK export which uses the slot must not use it during module initialization. `"use client"` is never emitted for a value shim (a value is not a client reference), and F9 does not apply.
 
-**What stays runtime.** Swinject's object scopes map to module semantics: one instance per bundle (container scope) by default, and a factory for anything per-call (transient scope, runtime arguments). Choosing an implementation **at runtime** (per user, per feature flag, per test) is by definition not a build-time decision. Inject a factory or strategy object that decides at runtime; tests keep using `vi.mock` / `jest.mock`.
+**What stays runtime.** A container's scopes map to module semantics: one instance per bundle (singleton scope) by default, and a factory for anything per-call (transient scope, runtime arguments). Choosing an implementation **at runtime** (per user, per feature flag, per test) is by definition not a build-time decision. Inject a factory or strategy object that decides at runtime; tests keep using `vi.mock` / `jest.mock`.
 
 **Known gaps.**
 - `argsFit` checks top-level members only; a nested object's methods get plain assignability.
@@ -1368,7 +1368,7 @@ The full record, including every graft and every evidence conflict, is in [DECIS
 
 **How it injects.** SDK components look up the implementation at render time: from a `slots` / `components` prop, or from a context provider the app mounts near the root.
 
-**Why it lost.** This is Swinject moved into React, so it fails the north star by design. The following points are design reasoning; this family was not lab-tested.
+**Why it lost.** This is a runtime DI container moved into React, so it fails the north star by design. The following points are design reasoning; this family was not lab-tested.
 
 - The decision is made while rendering, so a missing, misspelled or wrong registration surfaces only when the component renders.
 - A component rendered outside the provider, such as in a test or a second React root, silently gets the SDK default.
