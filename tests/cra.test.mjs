@@ -2,9 +2,10 @@
 // craco.config.js. Same mistakes as the webpack family (tests/webpack-family/suite.mjs CASES), run through the
 // REAL `craco build`; positive cases render the built bundle in headless Chromium (CRA has no SSR build).
 //
-// CRA specifics this suite pins down: the production config bails and prints only the FIRST error, it type-checks
-// src/** itself (fork-ts-checker 6, TypeScript 5.x only), TSC_COMPILE_ON_ERROR=true makes its build exit 0 on any
-// error, ModuleScopePlugin rejects imports from src/ that resolve outside src/, and it uses a filesystem cache.
+// CRA specifics this suite pins down: the production config bails and prints only the FIRST error,
+// TSC_COMPILE_ON_ERROR=true makes its build exit 0 on any error, ModuleScopePlugin rejects imports from src/ that
+// resolve outside src/ (the shims live in .stunt-double/gen), its own type check (fork-ts-checker 6) sees src/**
+// only, so not .stunt-double/check.ts, and it uses a filesystem cache.
 //
 // Every case runs on a fresh copy of one install (node_modules hard-linked; cases that run npm get a full copy).
 import { test, before, after } from 'node:test';
@@ -74,10 +75,10 @@ before(() => {
   // Install the example exactly like a user would, from the .packs/ tarballs (no lockfile: the tarballs'
   // integrity changes whenever `npm run setup` re-packs them).
   execFileSync('cp', ['-a', example, base]);
-  for (const x of ['node_modules', 'build', 'package-lock.json', 'sdk-slots/gen', 'src/stunt-double.check.ts'])
+  for (const x of ['node_modules', 'build', 'package-lock.json', '.stunt-double'])
     fs.rmSync(path.join(base, x), { recursive: true, force: true });
   const pj = JSON.parse(read(base, 'package.json'));
-  for (const k of ['dependencies', 'devDependencies']) for (const [name, v] of Object.entries(pj[k] ?? {}))
+  for (const k of ['dependencies', 'devDependencies', 'overrides']) for (const [name, v] of Object.entries(pj[k] ?? {}))
     if (/^file:(\.\.\/)+\.packs\//.test(v)) pj[k][name] = `file:${path.join(packs, v.replace(/^file:(\.\.\/)+\.packs\//, ''))}`;
   write(base, 'package.json', JSON.stringify(pj, null, 2) + '\n');
   npmInstall(base);
@@ -127,14 +128,19 @@ test('cra: TSC_COMPILE_ON_ERROR=true (CRA then exits 0 on any error) still fails
   done(d);
 });
 
-test('cra: CRA\'s own type check (fork-ts-checker, src/**) also fails F1a and F9c with the adapter gate off', () => {
+test('cra: known gap: with typecheck:false nothing checks the contract (CRA\'s own type check does not see .stunt-double/check.ts)', () => {
   const d = fresh();
   setCraco(d, 'typecheck: false');
   CASES.F1a.m(d);
-  assertFails(build(d), /TS2741: Property 'tone' is missing|TS2322/);
-  write(d, 'src/overrides/Button.tsx', read(example, 'src/overrides/Button.tsx'));
-  CASES.F9c.m(d);
-  assertFails(build(d), /\[F9\] client slot override must not be an async component/);
+  const r = build(d);
+  assert.equal(r.status, 0, `if F1a now fails with the gate off, update docs/tools/cra.md\n${r.out.slice(-3000)}`);
+  done(d);
+});
+
+test('cra: CRA template tsconfig (moduleResolution "node") fails closed with TypeScript\'s own hint', () => {
+  const d = fresh();
+  write(d, 'tsconfig.json', read(d, 'tsconfig.json').replace('"moduleResolution": "bundler"', '"moduleResolution": "node"'));
+  assertFails(build(d), /\[TS\] [^\n]*TS2307[^\n]*'@acme\/core\/(contracts|original\/Button)'[^\n]*Consider updating to 'node16', 'nodenext', or 'bundler'/);
   done(d);
 });
 
@@ -149,20 +155,9 @@ test('cra: app code may import the public socket @acme/core-slots/X (ModuleScope
 
 test('cra: F6b craco config without the adapter fails on the registry placeholder', () => {
   const d = fresh();
-  fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
-  fs.mkdirSync(path.join(d, 'node_modules/@acme/core-slots'));
-  execFileSync('tar', ['-xzf', path.join(packs, 'acme-core-slots-0.0.1.tgz'), '-C', path.join(d, 'node_modules/@acme/core-slots'), '--strip-components=1']);
+  assert.ok(fs.existsSync(path.join(d, 'node_modules/@acme/core-slots/not-wired.js')), 'the placeholder peer is installed');
   write(d, 'craco.config.js', 'module.exports = {}; // not wired\n');
   assertFails(build(d), /Module not found[^\n]*STUNT-DOUBLE-NOT-WIRED/);
-  done(d);
-});
-
-test('cra: F6f placeholder installed instead of the link, with the adapter: wiring self-test', () => {
-  const d = fresh();
-  fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
-  fs.mkdirSync(path.join(d, 'node_modules/@acme/core-slots'));
-  execFileSync('tar', ['-xzf', path.join(packs, 'acme-core-slots-0.0.1.tgz'), '-C', path.join(d, 'node_modules/@acme/core-slots'), '--strip-components=1']);
-  assertFails(build(d), /\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(the registry placeholder/);
   done(d);
 });
 
