@@ -59,6 +59,10 @@ function withOne(config, opts) {
       config.resolve.alias = { ...Object.fromEntries(targets.map(([k, v]) => [`${k}$`, v])), ...(config.resolve.alias ?? {}) };
       for (const [k, v] of targets) config.resolve.alias[`${k}$`] = v;
     }
+    // CRA's ModuleScopePlugin rejects imports from src/ that resolve outside src/: allow exactly the shims, so app
+    // code can import the public socket '@acme/core-slots/X' as with every other tool.
+    for (const rp of config.resolve.plugins ?? [])
+      if (rp?.allowedFiles instanceof Set && Array.isArray(rp.appSrcs)) for (const [, shim] of targets) rp.allowedFiles.add(shim);
   }
 
   config.module ??= {};
