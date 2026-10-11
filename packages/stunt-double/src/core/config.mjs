@@ -10,8 +10,9 @@ export const PACKAGE_KEY = 'stuntDouble';
 export const DEFAULTS = Object.freeze({
   sdk: null, // auto-detected: the one dependency that ships a slot-manifest.json
   overridesDir: 'src/overrides',
-  slotsDir: 'sdk-slots',
-  checkFile: 'src/stunt-double.check.ts',
+  // ONE generated directory: shims (gen/), the check file, the gate's tsconfig, state. null = auto:
+  // ".stunt-double", or the linked slot package's directory in the universal tier (e.g. "sdk-slots").
+  outDir: null,
   tsconfig: null, // auto: tsconfig.json, or the referenced app config of a solution-style tsconfig.json
   typescript: 'typescript', // a package NAME, so an npm alias ("typescript5") can be the gate compiler
   rsc: 'auto',
@@ -26,6 +27,19 @@ export const DEFAULTS = Object.freeze({
 
 const KNOWN = new Set(['$schema', ...Object.keys(DEFAULTS)]);
 const MAP_KEYS = new Set(['from', 'export', 'ignoresProps']);
+/** Keys of earlier layouts: a clear CFG error instead of "unknown key". */
+const REPLACED = {
+  slotsDir: '"outDir" (one generated directory; the universal tier derives it from the link)',
+  checkFile: '"outDir" (the check file is <outDir>/check.ts)',
+};
+/** Accepted by the schema of a later version but not implemented here: refuse, never silently ignore. */
+const NOT_IMPLEMENTED = {
+  relativeEdges: (v) => v === 'redirect'
+    ? `[CFG] "relativeEdges": "redirect" is not implemented in stunt-double 0.1: remove it. The default ("error") reports SDK files that import their own defaults as [F6].`
+    : null,
+};
+const STRING_KEYS = ['overridesDir', 'typescript'];
+const NULLABLE_STRING_KEYS = ['sdk', 'outDir', 'tsconfig'];
 
 /**
  * Load the config. `overrides` (adapter options) win over the file. Unknown keys are errors: a typo in the
@@ -56,7 +70,11 @@ export function loadConfig(root, overrides = {}) {
       source = `package.json "${PACKAGE_KEY}"`;
     }
   }
-  for (const k of Object.keys(raw)) if (!KNOWN.has(k)) problems.push(`[CFG] unknown key "${k}" in ${source}. Known keys: ${[...KNOWN].filter((x) => x !== '$schema').join(', ')}.`);
+  for (const k of Object.keys(raw)) {
+    if (REPLACED[k]) problems.push(`[CFG] "${k}" in ${source} was replaced by ${REPLACED[k]}: remove it.`);
+    else if (!KNOWN.has(k)) problems.push(`[CFG] unknown key "${k}" in ${source}. Known keys: ${[...KNOWN].filter((x) => x !== '$schema').join(', ')}.`);
+  }
+  for (const k of Object.keys(REPLACED)) if (overrides[k] !== undefined) problems.push(`[CFG] option "${k}" was replaced by ${REPLACED[k]}.`);
   const pick = {};
   for (const k of Object.keys(DEFAULTS)) {
     if (overrides[k] !== undefined) pick[k] = overrides[k];
@@ -72,7 +90,11 @@ export function loadConfig(root, overrides = {}) {
   for (const k of ['layers', 'allowOriginalImports', 'singletons', 'scanPackages', 'sourceDirs'])
     if (!Array.isArray(cfg[k])) problems.push(`[CFG] "${k}" must be an array.`);
   if (!['auto', true, false].includes(cfg.rsc)) problems.push(`[CFG] "rsc" must be "auto", true or false.`);
-  if (!['error', 'redirect'].includes(cfg.relativeEdges)) problems.push(`[CFG] "relativeEdges" must be "error" or "redirect".`);
+  for (const k of STRING_KEYS) if (typeof cfg[k] !== 'string' || !cfg[k]) problems.push(`[CFG] "${k}" must be a non-empty string.`);
+  for (const k of NULLABLE_STRING_KEYS) if (cfg[k] !== null && (typeof cfg[k] !== 'string' || !cfg[k])) problems.push(`[CFG] "${k}" must be a non-empty string.`);
+  const ni = NOT_IMPLEMENTED.relativeEdges(cfg.relativeEdges);
+  if (ni) problems.push(ni);
+  else if (cfg.relativeEdges !== 'error') problems.push(`[CFG] "relativeEdges" must be "error".`);
   return { cfg, configFile: file, configSource: source, problems };
 }
 
