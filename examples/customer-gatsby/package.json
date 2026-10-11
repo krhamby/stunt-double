@@ -4,17 +4,14 @@
   "version": "0.0.0",
   "description": "A project that injects its own components into @acme/core with stunt-double (Gatsby 5).",
   "scripts": {
-    "postinstall": "stunt-double gen --no-fail",
     "develop": "gatsby develop",
     "build": "gatsby build",
     "serve": "gatsby serve",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "stunt-double check",
     "probe": "node probes/render.mjs public/index.html"
   },
   "dependencies": {
     "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
-    "@acme/core-slots": "file:./sdk-slots",
     "gatsby": "5.16.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -24,5 +21,8 @@
     "@types/react-dom": "19.3.0",
     "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz"
   }
 }
