@@ -20,7 +20,7 @@ stunt-double plugs into webpack through one wrapper, `withStuntDouble()` from `s
    It also accepts an array of configs (multi-compiler) and a config function: `export default withStuntDouble((env, argv) => ({ ... }))`.
 3. Put your components in `src/overrides/<Slot>.tsx` (for example `src/overrides/Button.tsx` exporting `Button`).
 
-That is all. `webpack` and `webpack serve` now validate the overrides at every start and rebuild, and a mistake fails the build or shows in the dev overlay.
+`webpack` and `webpack serve` then validate the overrides at every start and rebuild, and a mistake fails the build or shows in the dev overlay.
 
 ### What the wrapper changes in your config
 
@@ -45,23 +45,23 @@ webpack 5.111.1, webpack-cli 7.2.3, webpack-dev-server 6.0.0, swc-loader 0.2.7 w
 |---|---|---|---|
 | F1a | Override requires a prop the SDK never passes | build (type check) | overlay after the edit ✓ |
 | F1b, F1b-upgrade | Override ignores SDK props; an SDK upgrade widens a hand-typed contract | build (type check) | overlay |
-| F1c-* | `React.FC`, `memo`, `forwardRef`, class, returns `children` | **passes** and renders | passes |
+| F1c-* | `React.FC`, `memo`, `forwardRef`, class, returns `children` | passes and renders | passes |
 | F2a, F2a-stray | Typo (`Buton.tsx`) or stray file in `src/overrides` | build | overlay ✓ |
 | F2b | SDK 2.0.0 renames a slot | build, "RENAMED to \"Price\"" | overlay |
 | F3a, F3b | Required slot missing (also: new required slot after an upgrade) | build | overlay ✓ |
 | F4 | Two files claim one slot | build | overlay |
 | F5a, F5b | Default export, or wrong export name | build | overlay ✓ |
 | CFG | Unknown key in `stunt-double.config.json` | build | overlay |
-| UPG-minor | SDK minor adds an optional slot | **passes**, SDK default renders | passes |
+| UPG-minor | SDK minor adds an optional slot | passes, SDK default renders | passes |
 | F6a | Installed SDK imports its own default | build (scan of the installed SDK) | overlay |
 | F6b-config | A second config without the adapter | build: `Module not found: … STUNT-DOUBLE-NOT-WIRED …` | same text |
-| F6b-node | Plain Node imports `@acme/core` | `ERR_MODULE_NOT_FOUND … STUNT-DOUBLE-NOT-WIRED` | — |
-| F6c-externals | Server build with `webpack-node-externals` | **handled**: the SDK stays bundled, renders correctly | — |
-| F6c-externals-regex | A string/RegExp external captures `@acme/core` | build: `[F6] "@acme/core" is external in this node build` | — |
+| F6b-node | Plain Node imports `@acme/core` | `ERR_MODULE_NOT_FOUND … STUNT-DOUBLE-NOT-WIRED` | n/a |
+| F6c-externals | Server build with `webpack-node-externals` | the SDK stays bundled, renders correctly | n/a |
+| F6c-externals-regex | A string/RegExp external captures `@acme/core` | build: `[F6] "@acme/core" is external in this node build` | n/a |
 | F6-audit | A plugin resolves a socket elsewhere | build (module-graph audit) | overlay |
-| F6e-remove, F6e-add | Override removed / added with a warm persistent cache | **correct** output, never the cached decision | correct |
+| F6e-remove, F6e-add | Override removed / added with a warm persistent cache | correct output, never the cached decision | correct |
 | F6g | App code imports `@acme/core/original/X` | build | overlay |
-| F6h-add, F6h-remove | Override added / removed without regenerating | **regenerated**, correct output | regenerated in the same rebuild ✓ |
+| F6h-add, F6h-remove | Override added / removed without regenerating | regenerated, correct output | regenerated in the same rebuild ✓ |
 | F7a–F7d | Override reaches its own slot (socket, barrel, helper file, namespace) | build | overlay ✓ |
 | F8 | Two copies of React | build | overlay |
 | F9b | Client-slot override imports `server-only` | build | overlay |
