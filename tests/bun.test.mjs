@@ -1,11 +1,15 @@
-// Bun 1.4 suite: examples/customer-bun built with Bun.build + stuntDoubleBun() (T1), the `bun build` CLI
-// without any stunt-double code (T0 bare: the CLI cannot load plugins), `bun test` (runtime, no plugin) and
-// `stunt-double check` (the chain every adapter-less command needs).
+// Bun 1.4 suite. examples/customer-bun is the three-step default (install, the plugin line in build.ts,
+// src/overrides; bunfig lines for the dev server and `bun test`): no link, no tsconfig paths, no config.
+// It runs `bun build.ts` (Bun.build + stuntDoubleBun(), T1), `stunt-double check`, `bun test` with the
+// stunt-double/bun-test preload, and the dev server (`bun ./index.html`). Commands that run NO stunt-double
+// code — the `bun build` CLI (it cannot load plugins) and `bun test` without the preload — need the universal
+// tier (`stunt-double init --universal`: a committed sdk-slots/ stub linked with "workspace:*"); those cells
+// run on a universal-tier copy, so "bare" means T0 without `stunt-double check &&`.
 //
 //   npm run setup && node --test tests/bun.test.mjs        (BUN=/path/to/bun to pick a binary)
 //
-// Every mutation lists what each of the four commands does with it. Those cells are OBSERVED behaviour of
-// Bun 1.4.2: where only `stunt-double check &&` (or CI tsc) catches a mistake, the bare cell says so.
+// Every cell is OBSERVED behaviour of Bun 1.4.2: where only `stunt-double check &&` catches a mistake, the bare
+// cell says so.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,7 +24,8 @@ const packs = path.join(repo, '.packs');
 const example = path.join(repo, 'examples/customer-bun');
 const BUN = process.env.BUN ?? (fs.existsSync(path.join(os.homedir(), '.bun/bin/bun')) ? path.join(os.homedir(), '.bun/bin/bun') : 'bun');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-bun-'));
-const base = path.join(work, 'base');
+const base = path.join(work, 'base'); // adapter tier: the example as committed
+const baseU = path.join(work, 'base-universal'); // universal tier: + `stunt-double init --universal`
 
 function run(cmd, args, cwd, { env = {}, timeout = 180_000 } = {}) {
   const t0 = Date.now();
@@ -47,10 +52,10 @@ function bunInstall(dir) {
   return run(BUN, ['install'], dir);
 }
 
-/** A copy of the installed base project (symlinks kept verbatim: the isolated store links are relative). */
-function project(name, mutate) {
+/** A copy of an installed base project (symlinks kept verbatim: the isolated store links are relative). */
+function project(name, mutate, { universal = false } = {}) {
   const dir = path.join(work, name);
-  fs.cpSync(base, dir, { recursive: true, verbatimSymlinks: true });
+  fs.cpSync(universal ? baseU : base, dir, { recursive: true, verbatimSymlinks: true });
   mutate?.(dir);
   return dir;
 }
@@ -67,10 +72,9 @@ const cmd = {
   check: (dir) => run(process.execPath, [sdCli(dir), 'check'], dir),
   /** T0 bare: the `bun build` CLI (no plugins possible), SSR bundle for the probe */
   bare: (dir) => run(BUN, ['build', './src/entry-server.tsx', '--target', 'node', '--format', 'esm', '--outdir', 'dist-bare'], dir),
-  /** `bun test`: Bun runtime, sockets resolve through the workspace link / tsconfig paths */
   /** `bun test` with bunfig [test] preload = ["stunt-double/bun-test"] (STA + gate + scoped socket rewrite) */
   test: (dir) => run(BUN, ['test'], dir),
-  /** `bun test` with the preload line removed: the Bun runtime resolves sockets through the link / tsconfig paths */
+  /** `bun test` with the preload line removed: the Bun runtime resolves sockets natively (link, or the placeholder) */
   testBare: (dir) => { dropPreload(dir); return run(BUN, ['test'], dir); },
   /** node-run of a built SSR bundle; a small heap + timeout turn an infinite render (F7) into a quick crash */
   probe: (dir, entry = 'dist-ssr/entry-server.js') => run(process.execPath, ['--max-old-space-size=128', 'probes/render.mjs', entry], dir, { timeout: 60_000 }),
@@ -95,11 +99,21 @@ const passes = (r) => assert.equal(r.code, 0, show(r));
 before(() => {
   for (const t of ['acme-core-1.0.0.tgz', 'stunt-double-0.1.0.tgz', 'acme-core-slots-0.0.1.tgz'])
     assert.ok(fs.existsSync(path.join(packs, t)), `missing .packs/${t}: run \`npm run setup\` first`);
-  fs.cpSync(example, base, { recursive: true, filter: (s) => !/[\\/](node_modules|dist|dist-ssr|dist-bare)$|bun\.lockb?$|[\\/]sdk-slots[\\/]gen$|stunt-double\.check\.ts$/.test(s) });
+  const skip = /[\\/](node_modules|dist|dist-ssr|dist-bare|\.stunt-double)$|bun\.lockb?$/;
+  fs.cpSync(example, base, { recursive: true, filter: (s) => !skip.test(s) });
   const f = path.join(base, 'package.json');
   writeJson(f, JSON.parse(fs.readFileSync(f, 'utf8').replaceAll('file:../../.packs/', `file:${packs}/`)));
   const r = bunInstall(base);
   assert.equal(r.code, 0, `bun install failed\n${show(r)}`);
+  // universal tier: what `npx stunt-double init --universal` does for Bun, then bun install
+  fs.cpSync(base, baseU, { recursive: true, verbatimSymlinks: true });
+  const init = run(process.execPath, [sdCli(baseU), 'init', '--universal'], baseU);
+  assert.equal(init.code, 0, show(init));
+  const ru = bunInstall(baseU);
+  assert.equal(ru.code, 0, `bun install (universal) failed\n${show(ru)}`);
+  // init + install leave sdk-slots/gen/ empty; the first `stunt-double check &&` (or gen) fills it
+  const gen = run(process.execPath, [sdCli(baseU), 'gen'], baseU);
+  assert.equal(gen.code, 0, show(gen));
 });
 after(() => { if (!process.env.KEEP) fs.rmSync(work, { recursive: true, force: true }); });
 
@@ -113,11 +127,28 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     assert.match(r.out.trim(), /^1\.4\.\d+/, show(r));
   });
 
-  test('bun install: workspace:* links sdk-slots into the SDK\'s isolated store (no copy)', () => {
-    const sdkDir = fs.realpathSync(path.join(base, 'node_modules/@acme/core'));
-    const seen = fs.realpathSync(path.join(sdkDir, '..', 'core-slots'));
-    assert.equal(seen, fs.realpathSync(path.join(base, 'sdk-slots')));
-    assert.ok(fs.existsSync(path.join(base, 'sdk-slots/gen/Button.jsx')), 'postinstall (stunt-double gen) ran under bun install');
+  test('three-step install: no link, the SDK\'s @acme/core-slots peer is the registry placeholder', () => {
+    const pkg = readJson(path.join(base, 'package.json'));
+    assert.equal(pkg.dependencies['@acme/core-slots'], undefined);
+    assert.equal(pkg.workspaces, undefined);
+    assert.ok(!fs.existsSync(path.join(base, 'stunt-double.config.json')) && !fs.existsSync(path.join(base, 'sdk-slots')));
+    assert.doesNotMatch(fs.readFileSync(path.join(base, 'tsconfig.json'), 'utf8'), /paths|stunt-double/);
+    const seen = path.join(fs.realpathSync(path.join(base, 'node_modules/@acme/core')), '..', 'core-slots', 'package.json');
+    assert.equal(readJson(seen).stuntDouble?.placeholder, true);
+  });
+
+  test('universal tier: init --universal + bun install links sdk-slots/ (workspace:*) into the SDK\'s isolated store', () => {
+    const pkg = readJson(path.join(baseU, 'package.json'));
+    assert.equal(pkg.dependencies['@acme/core-slots'], 'workspace:*');
+    assert.deepEqual(pkg.workspaces, ['sdk-slots']);
+    const seen = fs.realpathSync(path.join(fs.realpathSync(path.join(baseU, 'node_modules/@acme/core')), '..', 'core-slots'));
+    assert.equal(seen, fs.realpathSync(path.join(baseU, 'sdk-slots')));
+    passes(cmd.check(project('universal-check', null, { universal: true })));
+  });
+
+  test('universal tier before the first gen/check: the `bun build` CLI fails loudly (no shims yet), never a default', () => {
+    const dir = project('universal-nogen', (d) => fs.rmSync(path.join(d, 'sdk-slots/gen'), { recursive: true, force: true }), { universal: true });
+    fails(cmd.bare(dir), /Could not resolve: "@acme\/core-slots\/Button"/);
   });
 
   test('bun build.ts: exit 0; SSR bundle renders every override in app and SDK positions', () => {
@@ -143,40 +174,20 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     const pkg = readJson(path.join(dir, 'package.json'));
     pkg.scripts['build:cli'] = 'bun build ./src/main.tsx --outdir dist';
     writeJson(path.join(dir, 'package.json'), pkg);
-    fails(run(process.execPath, [sdCli(dir), 'doctor'], dir), /\[DOCTOR\] script "build:cli" runs an adapter-less bundler without the gate/);
+    fails(run(process.execPath, [sdCli(dir), 'doctor'], dir), /\[DOCTOR\] script "build:cli" runs a tool without a stunt-double adapter and without the gate/);
   });
 
-  test('bun test (bun-test preload) renders the overrides', () => {
+  test('bun test (bun-test preload; no link, no paths) renders the overrides', () => {
     const r = cmd.test(project('positive-test'));
     passes(r);
     assert.match(r.out, /3 pass/, show(r));
   });
 
-  test('bun test without the preload (the link) renders the overrides', () => {
-    const r = cmd.testBare(project('positive-test-bare'));
+  test('bun test without the preload: fails CLOSED on the placeholder (adapter tier), renders via the link (universal)', () => {
+    fails(cmd.testBare(project('positive-test-unwired')), /Cannot find module '\.\/STUNT-DOUBLE-NOT-WIRED/);
+    const r = cmd.testBare(project('positive-test-bare', null, { universal: true }));
     passes(r);
     assert.match(r.out, /3 pass/, show(r));
-  });
-
-  test('bun-test preload alone wires bun test: no link, no tsconfig paths for the Bun runtime', () => {
-    const dir = project('preload-only', (d) => {
-      fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { force: true });
-      fs.rmSync(path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots'), { force: true });
-      const pkg = readJson(path.join(d, 'package.json'));
-      delete pkg.dependencies['@acme/core-slots'];
-      delete pkg.workspaces;
-      writeJson(path.join(d, 'package.json'), pkg);
-      // the Bun runtime reads tsconfig.json (no paths now); the type gate reads tsconfig.gate.json (paths)
-      const ts = fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8');
-      fs.writeFileSync(path.join(d, 'tsconfig.gate.json'), ts);
-      fs.writeFileSync(path.join(d, 'tsconfig.json'), ts.replace(/^\s*"paths".*$/m, ''));
-      writeJson(path.join(d, 'stunt-double.config.json'), { ...readJson(path.join(d, 'stunt-double.config.json')), tsconfig: 'tsconfig.gate.json' });
-    });
-    const r = cmd.test(dir);
-    passes(r);
-    assert.match(r.out, /3 pass/, show(r));
-    // without the preload line: fails CLOSED on the unresolvable socket, never the SDK default
-    fails(cmd.testBare(dir), /Cannot find module '@acme\/core-slots\/Button'/);
   });
 
   test('a throw in the bun-test preload fails bun test (exit 1) and prints the [Fx] text', () => {
@@ -186,31 +197,11 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     assert.match(r.out, / 0 pass/, 'no test ran');
   });
 
-  test('`bun build` CLI (T0, no plugin): the link alone wires the bundle', () => {
-    const dir = project('positive-bare');
+  test('`bun build` CLI (no plugin): fails CLOSED on the placeholder (adapter tier); the link wires it (universal)', () => {
+    fails(cmd.bare(project('positive-bare-unwired')), /Could not resolve: "\.\/STUNT-DOUBLE-NOT-WIRED/);
+    const dir = project('positive-bare', null, { universal: true });
     passes(cmd.bare(dir));
     assertRender(cmd.probe(dir, 'dist-bare/entry-server.js'), POSITIVE);
-  });
-
-  test('onResolve: Bun.build sees the SDK\'s bare socket specifiers (works with the link removed)', () => {
-    const dir = project('onresolve', (d) => {
-      // remove both links; the wiring check would then fail, so declare no link at all (adapter-only project)
-      fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { force: true });
-      fs.rmSync(path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots'), { force: true });
-      const pkg = readJson(path.join(d, 'package.json'));
-      delete pkg.dependencies['@acme/core-slots'];
-      delete pkg.workspaces;
-      writeJson(path.join(d, 'package.json'), pkg);
-      const ts = fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8').replace(/^\s*"paths".*$/m, '');
-      fs.writeFileSync(path.join(d, 'tsconfig.json'), ts);
-      // the type gate's tsc needs the link or paths ([F6] TS2307 otherwise): this test isolates resolution
-      const b = path.join(d, 'build.ts');
-      fs.writeFileSync(b, fs.readFileSync(b, 'utf8').replace('stuntDoubleBun()', 'stuntDoubleBun({ typecheck: false })'));
-    });
-    passes(cmd.build(dir));
-    assertRender(cmd.probe(dir), POSITIVE);
-    // ...while the Bun RUNTIME (no preload) has nothing to resolve the socket with: loud, never the SDK default
-    fails(cmd.testBare(dir), /Cannot find module '@acme\/core-slots\/Button'/);
   });
 
   // regression: Bun.build's `root` (output layout) is neither the project root nor the metafile base
@@ -222,7 +213,7 @@ await Bun.build({ entrypoints: ['./src/entry-server.tsx'], root: './src', outdir
     const dir = project('root-option', (d) => { write(d, 'ok.ts', script(false)); write(d, 'bad.ts', script(true)); });
     passes(run(BUN, ['ok.ts'], dir));
     assertRender(cmd.probe(dir), POSITIVE);
-    fails(run(BUN, ['bad.ts'], dir), /\[F6\] @acme\/core imports @acme\/core-slots\/Button but sdk-slots\/gen\/Button\.jsx is not in the bundle/);
+    fails(run(BUN, ['bad.ts'], dir), /\[F6\] @acme\/core imports @acme\/core-slots\/Button but \.stunt-double\/gen\/Button\.jsx is not in the bundle/);
   });
 
   // external rules (server targets): externalizing the SDK builds fine natively and fails only at boot, so the
@@ -247,16 +238,14 @@ await Bun.build({ entrypoints: ['./src/entry-server.tsx'], outdir: './dist-ssr',
 
   test('a runtime Bun.plugin onResolve (preload) never sees the SDK\'s bare socket specifiers', () => {
     const dir = project('runtime-plugin', (d) => {
-      fs.rmSync(path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots'), { force: true });
-      fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { force: true });
-      fs.writeFileSync(path.join(d, 'tsconfig.json'), fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8').replace(/^\s*"paths".*$/m, ''));
       dropPreload(d); // only the hand-written runtime plugin below
       fs.writeFileSync(path.join(d, 'preload.ts'), `import { plugin } from 'bun';
-plugin({ name: 'rt', setup(b) { b.onResolve({ filter: /^@acme\\/core-slots\\// }, (a) => { console.log('RUNTIME-ONRESOLVE ' + a.path); return { path: ${JSON.stringify(path.join(d, 'sdk-slots/gen'))} + '/' + a.path.split('/').pop() + '.jsx' }; }); } });
+plugin({ name: 'rt', setup(b) { b.onResolve({ filter: /^@acme\\/core-slots\\// }, (a) => { console.log('RUNTIME-ONRESOLVE ' + a.path); return { path: ${JSON.stringify(path.join(d, '.stunt-double/gen'))} + '/' + a.path.split('/').pop() + '.jsx' }; }); } });
 `);
     });
     const r = run(BUN, ['test', '--preload', './preload.ts'], dir);
-    fails(r, /Cannot find module '@acme\/core-slots\/Button'/);
+    // the bare specifier resolves natively to the placeholder; the runtime plugin is never asked
+    fails(r, /Cannot find module '\.\/STUNT-DOUBLE-NOT-WIRED/);
     assert.doesNotMatch(r.out, /RUNTIME-ONRESOLVE/);
   });
 });
@@ -328,7 +317,7 @@ describe('dev server: bun ./index.html', { skip: !selected('dev') }, () => {
       const saved = fs.readFileSync(logo, 'utf8');
       fs.rmSync(logo);
       // the plugin's watcher poisons the shims; Bun rebuilds and serves its error page (HTTP 500)
-      await s.until('the poisoned shims', () => fs.readFileSync(path.join(dir, 'sdk-slots/gen/Button.jsx'), 'utf8').includes('STUNT-DOUBLE-ERROR -- [F3]'));
+      await s.until('the poisoned shims', () => fs.readFileSync(path.join(dir, '.stunt-double/gen/Button.jsx'), 'utf8').includes('STUNT-DOUBLE-ERROR -- [F3]'));
       const bad = await s.until('HTTP 500', async () => { const p = await s.page(); return p.status === 500 && p; });
       assert.equal(bad.status, 500);
       await s.until('[F3] on the dev server output', () => /\[F3\] required slot "Logo" has no implementation/.test(s.log) && /Could not resolve: "\.\/STUNT-DOUBLE-ERROR -- \[F3\]/.test(s.log));
@@ -352,8 +341,10 @@ describe('dev server: bun ./index.html', { skip: !selected('dev') }, () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------
-// Mutations. Cells: build = `bun build.ts` (T1), check = `stunt-double check`, bare = `bun build` CLI + run
-// of its bundle (T0 bare), test = `bun test` with the bun-test preload, testBare = `bun test` without it. Each cell is a function (dir, result) => void.
+// Mutations. Cells: build = `bun build.ts` (T1), check = `stunt-double check`, test = `bun test` with the
+// bun-test preload, dev = cold start of `bun ./index.html` — all on the adapter-tier example; bare = `bun build`
+// CLI + run of its bundle, testBare = `bun test` without the preload — on the universal-tier copy (T0 bare).
+// `tier: 'universal'` runs every cell on the universal copy; `bareTier: 'adapter'` runs bare cells unwired.
 const F = (re) => (r) => fails(r, re);
 const OK = (r) => passes(r);
 const write = (d, f, s) => { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), s); };
@@ -463,24 +454,30 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     testBare: F(/toHaveLength/), // only the example's own marker-count assertion notices
   },
   {
-    id: 'F6b', test: F(/registry placeholder/), dev: devErr(/registry placeholder/), what: 'unwired: the registry placeholder instead of the link',
-    apply: (d) => { const pkg = readJson(path.join(d, 'package.json')); delete pkg.workspaces; pkg.dependencies['@acme/core-slots'] = `file:${packs}/acme-core-slots-0.0.1.tgz`; writeJson(path.join(d, 'package.json'), pkg); bunInstall(d); write(d, 'tsconfig.json', fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8').replace(/^\s*"paths".*$/m, '')); },
-    build: F(/\[F6\] @acme\/core resolves @acme\/core-slots to .*registry placeholder/), check: F(/registry placeholder/),
-    bare: F(/STUNT-DOUBLE-NOT-WIRED/), testBare: F(/STUNT-DOUBLE-NOT-WIRED/),
+    id: 'F6b', what: 'a tool that was never wired: the `bun build` CLI / bun test without the preload, no link',
+    bareTier: 'adapter', apply: null,
+    build: OK, check: OK, test: OK, dev: devOk(),
+    // RES: the registry placeholder answers the socket at resolve time — never a silent SDK default
+    bare: F(/Could not resolve: "\.\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/),
+    testBare: F(/Cannot find module '\.\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/),
   },
   {
-    id: 'F6f', test: F(/\(a copy/), dev: devErr(/\(a copy/), what: 'link wired wrong: Bun "file:./sdk-slots" (a copy)',
+    id: 'F6f', tier: 'universal', what: 'universal tier, link wired wrong: Bun "file:./sdk-slots" instead of "workspace:*"',
     apply: (d) => {
       const pkg = readJson(path.join(d, 'package.json'));
       delete pkg.workspaces;
       pkg.dependencies['@acme/core-slots'] = 'file:./sdk-slots';
       writeJson(path.join(d, 'package.json'), pkg);
-      bunInstall(d); // observed: copies sdk-slots/, then tries to fetch the SDK's @acme/core-slots peer from the registry (404 -> exit 1)
-      assert.ok(!fs.lstatSync(path.join(d, 'node_modules/@acme/core-slots')).isSymbolicLink(), 'bun file: should be a copy');
+      bunInstall(d);
+      // observed: Bun resolves the SDK's @acme/core-slots peer from the registry (here: the fixture's
+      // "overrides" stand-in), never from the file: line, so the SDK sees the placeholder, not sdk-slots/
+      const seen = path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots', 'package.json');
+      assert.equal(readJson(seen).stuntDouble?.placeholder, true);
     },
-    build: F(/\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(a copy/), check: F(/a copy/),
-    // the copy holds a snapshot of gen/: correct today, stale after the next override change (R1)
-    bare: bareRender(POSITIVE), testBare: OK,
+    build: F(/\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(the registry placeholder.*not sdk-slots\/\. Use .*Bun "workspace:\*"/),
+    check: F(/registry placeholder.*not sdk-slots/), test: F(/registry placeholder.*not sdk-slots/), dev: devErr(/registry placeholder/),
+    // loud at resolve time (the placeholder), never a silent default
+    bare: F(/STUNT-DOUBLE-NOT-WIRED/), testBare: F(/STUNT-DOUBLE-NOT-WIRED/),
   },
   {
     id: 'F6g', test: F(/\[F6\] src\/App\.tsx/), dev: devErr(/\[F6\] src\/App\.tsx/), what: 'bypass: app code imports @acme/core/original/Button',
@@ -500,7 +497,7 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
 const hijack = { name: 'hijack', setup(b: any) { b.onResolve({ filter: /^@acme\\/core-slots\\/Button$/ }, () => ({ path: require.resolve('@acme/core/original/Button', { paths: [require('node:path').dirname(require.resolve('@acme/core'))] }) })); } };`).replaceAll('plugins: [sd]', 'plugins: [hijack, sd]'));
     },
     build: (r, dir) => {
-      fails(r, /\[F6\] .*imports the SDK default of slot "Button".*directly|\[F6\] @acme\/core imports @acme\/core-slots\/Button but sdk-slots\/gen\/Button\.jsx is not in the bundle/);
+      fails(r, /\[F6\] .*imports the SDK default of slot "Button".*directly|\[F6\] @acme\/core imports @acme\/core-slots\/Button but \.stunt-double\/gen\/Button\.jsx is not in the bundle/);
       assert.ok(!fs.readdirSync(path.join(dir, 'dist')).some((f) => f.endsWith('.js')), 'the adapter removes the outputs of a failed audit');
     },
     check: OK, bare: null, testBare: null, // only a build-script plugin can do this
@@ -564,16 +561,17 @@ describe('mutations (Bun 1.4)', () => {
     if (!selected(m.id)) continue;
     describe(`${m.id}: ${m.what}`, () => {
       let dir;
-      before(() => { dir = project(`m-${m.id}`, m.apply); });
+      const uni = (cell) => m.tier === 'universal' || (['bare', 'testBare'].includes(cell) && m.bareTier !== 'adapter');
+      before(() => { if (m.bare || m.testBare) dir = project(`m-${m.id}`, m.apply, { universal: uni('bare') }); });
       if (m.dev) test('dev', async () => {
-        const s = devServer(project(`m-${m.id}-dev`, m.apply));
+        const s = devServer(project(`m-${m.id}-dev`, m.apply, { universal: uni('dev') }));
         try { await m.dev(s); } finally { s.stop(); }
       });
       for (const cell of ['build', 'check', 'bare', 'test', 'testBare']) {
         if (!m[cell]) continue;
         test(cell, () => {
           // `check` regenerates; run it on its own copy so it never "fixes" the stale cells
-          const d = ['check', 'build', 'test'].includes(cell) ? project(`m-${m.id}-${cell}`, m.apply) : dir;
+          const d = ['check', 'build', 'test'].includes(cell) ? project(`m-${m.id}-${cell}`, m.apply, { universal: uni(cell) }) : dir;
           m[cell](cmd[cell](d), d);
         });
       }
