@@ -12,6 +12,9 @@ The reference project is [`examples/customer-vitest`](../../examples/customer-vi
 
 ## Setup
 
+1. `npm i -D stunt-double`
+2. Add `stuntDouble()` to the plugins of the config Vitest loads:
+
 ```ts
 // vite.config.ts (or vitest.config.ts)
 /// <reference types="vitest/config" />
@@ -30,6 +33,11 @@ export default defineConfig({
   },
 });
 ```
+
+3. Put overrides in `src/overrides/<Slot>.tsx`.
+
+No tsconfig, `.gitignore` or `package.json` changes are needed: generated files go to `.stunt-double/`, which
+ignores itself in git.
 
 The plugin must be in **every** config Vitest loads. If you keep a separate `vitest.config.ts`, either add
 `stuntDouble()` to it or build it from your Vite config with `mergeConfig(viteConfig, { test: { … } })`.
@@ -87,7 +95,7 @@ Every row was observed in `tests/vitest.test.mjs`.
 | F4 | Two files claim one slot | exit 1, `[F4]` | same | exit 1 |
 | F5 | Wrong export name | exit 1, `[F5]` | same | exit 1 |
 | F6a | Installed SDK imports a default directly | exit 1, `[F6]` | same | exit 1 |
-| F6b | A Vitest config **without** the plugin, universal-tier link installed | test files fail: `Unknown file extension ".jsx" for …/sdk-slots/gen/Button.jsx` (node and jsdom) | — | — |
+| F6b | A Vitest config **without** the plugin, universal-tier link installed | test files fail: `Unknown file extension ".jsx" for …/gen/Button.jsx` (node and jsdom) | — | — |
 | F6b | A Vitest config **without** the plugin (default install: registry placeholder) | test files fail: `Cannot find module '…/@acme/core-slots/STUNT-DOUBLE-NOT-WIRED -- … run npx stunt-double doctor'` | — | — |
 | F6c | `test.deps.optimizer.client` / `.ssr` includes the SDK | exit 1 at startup, `[F6] Vitest deps.optimizer.ssr pre-bundles @acme/core outside the plugin pipeline` | same | — |
 | F6d | Dependency pre-bundling (browser mode) | prevented: no project module in `node_modules/.vite` after a browser run | — | — |

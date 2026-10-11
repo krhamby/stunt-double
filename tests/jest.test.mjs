@@ -30,7 +30,10 @@ describe('positive: overrides render in app code and inside SDK components', () 
   it('@swc/jest (jest.swc.config.mjs)', () => passes(jest('-c', 'jest.swc.config.mjs')));
   it('universal tier: no mapper, jest-resolve follows a node_modules/@acme/core-slots -> sdk-slots link (chained after stunt-double check)', () => {
     ws.linkSlots();
-    try { passes(ws.run('sh', ['-c', 'stunt-double check && jest -c jest.universal.config.mjs'])); } finally { ws.reset(); }
+    try {
+      passes(ws.run('sh', ['-c', 'stunt-double check && jest -c jest.universal.config.mjs']));
+      assert.ok(ws.exists('sdk-slots/gen/Button.jsx'), 'universal tier: the link target is the outDir');
+    } finally { ws.reset(); }
   });
   it('opt-in type gate at config load passes on correct overrides', () => passes(jest('-c', 'jest.typecheck.config.mjs')));
   it('stunt-double check and tsc pass', () => {
@@ -117,10 +120,11 @@ export default withStuntDouble({ testEnvironment: 'jsdom', transformIgnorePatter
     } finally { ws.reset(); }
   });
   it('F6h: an override added without regenerating: the adapter regenerates at config load; the bare universal tier keeps the previous decision', () => {
+    ws.linkSlots();
+    const priceTag = ws.read('src/overrides/PriceTag.tsx');
     ws.remove('src/overrides/PriceTag.tsx');
     assert.equal(ws.run('stunt-double', ['gen']).code, 0);
-    ws.reset();   // PriceTag.tsx is back, the shim still says "SDK default"
-    ws.linkSlots();
+    ws.write('src/overrides/PriceTag.tsx', priceTag);   // back, but the shim still says "SDK default"
     try {
       assert.match(ws.read('sdk-slots/gen/PriceTag.jsx'), /@acme\/core\/original\/PriceTag/);
       const bare = jest('-c', 'jest.universal.config.mjs');
@@ -133,12 +137,16 @@ export default withStuntDouble({ testEnvironment: 'jsdom', transformIgnorePatter
 });
 
 describe('universal tier, bare `jest` (no wrapper, no `stunt-double check &&`): what is left to native resolution', () => {
-  const bare = () => { ws.linkSlots(); return jest('-c', 'jest.universal.config.mjs'); };
+  // universal tier, generated once (as a postinstall or an earlier `stunt-double gen` would), then the mistake
+  const universal = () => { ws.linkSlots(); assert.equal(ws.run('stunt-double', ['gen']).code, 0); };
+  const bare = () => jest('-c', 'jest.universal.config.mjs');
   it('F2a: silent: the stray file is simply unused and the tests pass', () => {
+    universal();
     MISTAKES.F2a.apply(ws);
     try { passes(bare()); } finally { ws.reset(); }
   });
   it('F3: loud: the stale Logo shim points at a file that no longer exists', () => {
+    universal();
     MISTAKES.F3.apply(ws);
     try {
       const r = bare();
@@ -147,6 +155,7 @@ describe('universal tier, bare `jest` (no wrapper, no `stunt-double check &&`): 
     } finally { ws.reset(); }
   });
   it('F5: RUNTIME only: babel/swc CommonJS interop turns the missing named export into undefined', () => {
+    universal();
     MISTAKES.F5.apply(ws);
     try {
       const r = bare();

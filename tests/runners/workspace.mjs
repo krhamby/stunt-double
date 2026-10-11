@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const PACKS = path.join(REPO, '.packs');
 
-const SKIP = new Set(['node_modules', 'dist', 'dist-ssr', 'storybook-static', '.vite', 'coverage']);
+const SKIP = new Set(['node_modules', 'dist', 'dist-ssr', 'storybook-static', '.vite', 'coverage', '.stunt-double']);
 
 /** Copy examples/<name> into a temp dir (file: tarball specs made absolute) and npm install it once. */
 export function createWorkspace(example, { install = true } = {}) {
@@ -22,7 +22,7 @@ export function createWorkspace(example, { install = true } = {}) {
     filter: (f) => !SKIP.has(path.basename(f)) && !f.includes(`${path.sep}sdk-slots${path.sep}gen`) && !f.endsWith('stunt-double.check.ts') && !f.endsWith('package-lock.json'),
   });
   const pj = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-  for (const field of ['dependencies', 'devDependencies'])
+  for (const field of ['dependencies', 'devDependencies', 'overrides'])
     for (const [k, v] of Object.entries(pj[field] ?? {}))
       if (typeof v === 'string' && v.startsWith('file:') && v.endsWith('.tgz')) pj[field][k] = 'file:' + path.resolve(src, v.slice(5));
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pj, null, 2) + '\n');
@@ -76,8 +76,16 @@ export class Workspace {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
-  /** Universal tier: replace the installed registry placeholder with a link node_modules/<pkg> -> <slotsDir>. */
+  /**
+   * Universal tier: a committed stub package at <slotsDir> and node_modules/<pkg> linked to it (what
+   * `"<pkg>": "file:./<slotsDir>"` installs), declared in package.json so core makes <slotsDir> the outDir.
+   */
   linkSlots(pkg = '@acme/core-slots', slotsDir = 'sdk-slots') {
+    this.write(`${slotsDir}/package.json`, JSON.stringify({
+      name: pkg, version: '0.0.0', private: true, type: 'module', sideEffects: false,
+      exports: { './package.json': './package.json', './*': { types: './gen/*.d.ts', default: './gen/*.jsx' } },
+    }, null, 2) + '\n');
+    this.edit('package.json', (s) => { const j = JSON.parse(s); j.dependencies = { ...j.dependencies, [pkg]: `file:./${slotsDir}` }; return JSON.stringify(j, null, 2) + '\n'; });
     const target = path.join(this.dir, 'node_modules', pkg);
     const backup = `${target}.__orig`;
     if (fs.existsSync(backup)) fs.rmSync(target, { recursive: true, force: true });
@@ -98,7 +106,8 @@ export class Workspace {
     }
     this.swaps = [];
     // drop empty dirs a mutation created (e.g. src/overrides/Button/)
-    for (const d of ['src/overrides/Button', 'src/legacy']) {
+    fs.rmSync(this.file('sdk-slots/gen'), { recursive: true, force: true });
+    for (const d of ['src/overrides/Button', 'src/legacy', 'sdk-slots']) {
       const f = this.file(d);
       if (fs.existsSync(f) && fs.readdirSync(f).length === 0) fs.rmdirSync(f);
     }
