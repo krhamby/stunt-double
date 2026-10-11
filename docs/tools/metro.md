@@ -88,6 +88,7 @@ On the dev server, the same STA rows appear as HTTP 500 plus a red box. F1 is on
 ## Known gaps
 
 - **Metro's JS API** gets no type gate in `typecheck: "auto"`. Pass `typecheck: true`, or run `stunt-double check` first.
+- **Never run a `Metro.runBuild` script through `node -e`** (for example in CI). Metro's worker processes inherit `process.execArgv`, so each worker re-runs the `-e` script and starts another build: a fork bomb. Put the script in a file.
 - **Dev server:** F1 does not block. It is logged asynchronously and is not pushed to the red box.
 - **Detecting the command from `argv` is a heuristic.** A wrapper CLI that loads the Metro config in-process under another command name falls back to "unknown". Unknown means STA throws but the type gate does not run. Set `command: 'build'` or `typecheck: true` explicitly.
 - **Error output:** a config-load throw prints Node's stack trace below the `[Fx]` lines. Metro's config loader tries `require()` and then `import()`, so generation runs twice before the error surfaces (about 0.1 s).
