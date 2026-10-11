@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    name: setup (build SDK variants + sdk-lint, pack .packs/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packs
+          path: .packs/
+          if-no-files-found: error
+          retention-days: 3
+
+  core:
+    name: core unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          pack: 'false'
+      - run: npm run test:core
+
+  vite:
+    name: Vite 8 + Vitest 5 suite
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          pack: 'false'
+      - uses: actions/download-artifact@v4
+        with:
+          name: packs
+          path: .packs/
+      - run: npm run test:vite
+      - name: upload scenario results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vite-results
+          path: /tmp/stunt-double-tests/*/results.json   # the harness's default work dir (os.tmpdir())
+          if-no-files-found: ignore
+          retention-days: 7
