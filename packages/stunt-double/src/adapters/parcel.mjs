@@ -1,24 +1,26 @@
-// stunt-double/parcel: the optional Parcel 2.16 resolver plugin. The universal tier (the sdk-slots link +
-// "@parcel/resolver-default": { "packageExports": true } + `stunt-double check && parcel build`) works without
-// it; the plugin moves STA and the type gate INTO `parcel build`, so a bare `parcel build` cannot skip them.
+// stunt-double/parcel: the Parcel 2.16 resolver plugin, the default Parcel setup. It resolves every
+// '<slotPackage>/<Slot>' import to the generated shim (no link needed) and runs STA and the type gate INSIDE
+// `parcel build` / `parcel serve`. Without it, Parcel needs the universal tier (`init --universal` link +
+// `stunt-double check && parcel build`).
 //
 // .parcelrc only accepts plugin names "parcel-resolver-*", "@scope/parcel-resolver[-*]" or relative paths
 // (@parcel/core ParcelConfig.schema.js validatePackageName), so "stunt-double/parcel" cannot be listed there
-// directly. The project adds a one-line local file and lists that (docs/tools/parcel.md):
+// directly. The project adds a two-line local file and lists that (docs/tools/parcel.md):
 //
-//   // parcel-resolver-stunt-double.mjs
-//   import { stuntDouble } from 'stunt-double/parcel';
-//   export default stuntDouble({ root: import.meta.dirname });
+//   // parcel-resolver-stunt-double.cjs   (CommonJS: an .mjs plugin makes Parcel warn on every build)
+//   const { stuntDouble } = require('stunt-double/parcel');
+//   module.exports = stuntDouble({ root: __dirname });
 //
 //   // .parcelrc
-//   { "extends": "@parcel/config-default", "resolvers": ["./parcel-resolver-stunt-double.mjs", "..."] }
+//   { "extends": "@parcel/config-default", "resolvers": ["./parcel-resolver-stunt-double.cjs", "..."] }
 //
 // What it does:
-//   loadConfig  STA (generate), then the TYP gate (awaited); an error fails `parcel build` (thrown here) or
-//               shows in the `parcel serve` overlay (thrown from resolve, see below); invalidations: startup, overrides dir (create), every file in it
-//               and mapped implementations, config files and the SDK manifest (change/delete)
-//   resolve     '<slotPackage>/<Slot>' -> <root>/sdk-slots/gen/<Slot>.jsx, content-addressed (unknown slots fall
-//               through to the default resolver, which fails on the link: never an SDK default)
+//   loadConfig  STA (generate) + [CFG] package exports on, then the TYP gate (awaited). An error fails
+//               `parcel build` (thrown here) or shows on the `parcel serve` error page (thrown from resolve).
+//               Invalidations: startup, the overrides dir (create), every file in it and mapped
+//               implementations, config files and the SDK manifest (change/delete)
+//   resolve     '<slotPackage>/<Slot>' -> p.shimFile(Slot), content-addressed (unknown slots fall through to
+//               the default resolver: the registry placeholder or the link, never an SDK default)
 // Never uses Parcel `alias`: a typo'd alias key is silently ignored.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -63,6 +65,12 @@ export function stuntDouble(opts = {}) {
         // Parcel 2.16.4: after a throw, neither fixing nor deleting the file triggers a rebuild until restart).
         // So in dev the error travels in the result and resolve() throws it for every socket import instead.
         const dev = options.hmrOptions != null || options.serveOptions !== false;
+        // CFG: '<sdk>/original/*' (wrapping a default) and every exports-only subpath need package exports, which
+        // Parcel 2.16 leaves off. Same lookup as @parcel/resolver-default (the package.json at Parcel's project
+        // root: the nearest directory with a lockfile or .git), so this sees exactly what the resolver will.
+        const exp = await config.getConfig([], { packageKey: '@parcel/resolver-default' });
+        if (p.sdk && exp?.contents?.packageExports !== true)
+          p.problems.push(`[CFG] Parcel resolves without package "exports", so "${p.sdk.originalSpecifier}*" cannot resolve: add "@parcel/resolver-default": { "packageExports": true } to ${path.join(options.projectRoot, 'package.json')} (Parcel's project root: the nearest directory with a lockfile or .git).`);
         let error = null;
         if (p.problems.length) error = formatProblems(p);
         else if (typecheck !== false) {

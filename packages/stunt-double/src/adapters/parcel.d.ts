@@ -1,7 +1,7 @@
 import type { GenerateOptions } from '../core/index.js';
 
 export interface StuntDoubleParcelOptions extends Omit<GenerateOptions, 'onError' | 'write'> {
-  /** Project root. Default process.cwd(); pass `import.meta.dirname` from the local plugin file. */
+  /** Project root. Default process.cwd(); pass `__dirname` (or `import.meta.dirname`) from the local plugin file. */
   root?: string;
   /** Run the contract type gate inside Parcel (build and serve). Default true. */
   typecheck?: boolean;

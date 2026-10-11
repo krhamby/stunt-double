@@ -2,10 +2,10 @@
 //   positive checks (SSR render of the built node-library bundle, live DOM in headless Chromium, bundle
 //   inspection: one React, no SDK default PriceTag), the persistent-cache check, and the mistake catalogue in
 //   three tiers, every expectation observed for real:
-//     T1     stunt-double/parcel resolver plugin in .parcelrc, BARE `parcel build`
-//     chain  universal tier (no .parcelrc): `stunt-double check && parcel build`
+//     T1     the default setup: stunt-double/parcel resolver plugin in .parcelrc, no link, BARE `parcel build`
+//     chain  universal tier (`stunt-double init --universal`, no .parcelrc): `stunt-double check && parcel build`
 //     bare   universal tier, bare `parcel build` (R1: what a project gets without the chain)
-//   plus `parcel serve` (T1) for F2 / F3 / F1 in dev: error page + recovery after the fix.
+//   plus `parcel serve` for F2 / F3 / F1 in dev (plugin, `stunt-double watch --`, bare): error page + recovery.
 //
 //   npm run setup && node --test tests/parcel.test.mjs
 import { test, before, after, describe } from 'node:test';
@@ -24,10 +24,11 @@ const example = path.join(repo, 'examples/customer-parcel');
 // Outside the repo on purpose: Parcel takes the nearest lockfile / .git above the entry as its project root.
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-parcel-'));
 const app = path.join(work, 'app');
-const pristine = path.join(work, 'pristine');
+const pristine = path.join(work, 'pristine'); // the example as committed: plugin, no link (default setup)
+const universal = path.join(work, 'universal'); // after `stunt-double init --universal`, without .parcelrc
 const KEEP_WORK = !!process.env.KEEP_WORK;
 
-const SKIP_COPY = new Set(['node_modules', 'dist', 'dist-ssr', '.parcel-cache', 'package-lock.json']);
+const SKIP_COPY = new Set(['node_modules', 'dist', 'dist-ssr', '.parcel-cache', '.stunt-double', 'package-lock.json']);
 const copyTree = (from, to, skip = SKIP_COPY) => fs.cpSync(from, to, { recursive: true, filter: (src) => !skip.has(path.basename(src)) || path.dirname(src) !== from });
 
 function sh(cmd, { cwd = app, env = {}, timeout = 180_000 } = {}) {
@@ -49,26 +50,38 @@ function installSdk(variant) {
   execFileSync('tar', ['xzf', path.join(packs, `acme-core-${variant}.tgz`), '-C', dir, '--strip-components=1']);
 }
 
-/** Restore the pristine project (sources, configs, SDK 1.0.0, the sdk-slots link) and regenerate. */
-function reset() {
+const installPlaceholder = () => {
+  const dir = path.join(app, 'node_modules/@acme/core-slots');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync('tar', ['xzf', path.join(packs, 'acme-core-slots-0.0.1.tgz'), '-C', dir, '--strip-components=1']);
+};
+
+/**
+ * Restore a pristine project with SDK 1.0.0 and regenerate:
+ *   'adapter'   the committed example (resolver plugin; @acme/core-slots is the registry placeholder)
+ *   'universal' the universal tier: no .parcelrc, sdk-slots/ linked (as `init --universal` + npm install leave it)
+ */
+function reset(setup = 'adapter') {
   for (const e of fs.readdirSync(app)) if (!['node_modules', '.parcel-cache'].includes(e)) rm(e);
-  copyTree(pristine, app, new Set());
+  copyTree(setup === 'universal' ? universal : pristine, app, new Set());
   installSdk('1.0.0');
-  const link = path.join(app, 'node_modules/@acme/core-slots');
-  fs.rmSync(link, { recursive: true, force: true });
-  fs.symlinkSync('../../sdk-slots', link, 'dir');
+  if (setup === 'universal') {
+    const link = path.join(app, 'node_modules/@acme/core-slots');
+    fs.rmSync(link, { recursive: true, force: true });
+    fs.symlinkSync('../../sdk-slots', link, 'dir');
+  } else installPlaceholder();
   const g = sh('npx stunt-double gen');
   assert.equal(g.code, 0, g.out);
 }
 
 const TIERS = {
-  T1: { prepare() {}, build: 'npx parcel build' },
-  chain: { prepare: () => rm('.parcelrc'), build: 'npx stunt-double check && npx parcel build' },
-  bare: { prepare: () => rm('.parcelrc'), build: 'npx parcel build' },
+  T1: { setup: 'adapter', build: 'npx parcel build' },
+  chain: { setup: 'universal', build: 'npx stunt-double check && npx parcel build' },
+  bare: { setup: 'universal', build: 'npx parcel build' },
 };
 
 function build(tier) {
-  TIERS[tier].prepare();
   rm('dist'); rm('dist-ssr');
   return sh(TIERS[tier].build);
 }
@@ -97,13 +110,21 @@ function playwright() {
 before(() => {
   assert.ok(fs.existsSync(path.join(packs, 'acme-core-1.0.0.tgz')), 'run `npm run setup` first');
   copyTree(example, app, new Set([...SKIP_COPY, '.gitignore']));
-  for (const g of ['sdk-slots/gen', 'src/stunt-double.check.ts']) rm(g);
   editJson('package.json', (j) => {
-    for (const deps of [j.dependencies, j.devDependencies]) for (const [k, v] of Object.entries(deps)) if (v.startsWith('file:../../.packs/')) deps[k] = `file:${path.join(packs, v.slice('file:../../.packs/'.length))}`;
+    for (const deps of [j.dependencies, j.devDependencies, j.overrides]) for (const [k, v] of Object.entries(deps)) if (v.startsWith('file:../../.packs/')) deps[k] = `file:${path.join(packs, v.slice('file:../../.packs/'.length))}`;
   });
   copyTree(app, pristine, new Set());
-  const r = sh('npm install --package-lock=false --no-audit --no-fund', { timeout: 300_000 });
+  const r = sh('npm install --no-audit --no-fund', { timeout: 300_000 });
   assert.equal(r.code, 0, r.out);
+  // The universal tier exactly as documented: `stunt-double init --universal` (writes sdk-slots/package.json and
+  // the "file:./sdk-slots" dependency), no .parcelrc. "overrides" is the fixture's stand-in for the registry
+  // peer and would conflict with the direct link dependency (npm EOVERRIDE), so it goes.
+  const init = sh('npx stunt-double init --universal');
+  assert.equal(init.code, 0, init.out);
+  rm('.parcelrc');
+  editJson('package.json', (j) => { delete j.overrides; });
+  copyTree(app, universal, new Set(['node_modules', '.stunt-double']));
+  assert.ok(fs.existsSync(path.join(universal, 'sdk-slots/package.json')), init.out);
   const versions = sh('npx parcel --version && node -p "require(\'typescript/package.json\').version + \' typescript\'"');
   console.log(`parcel suite: ${work} (parcel ${versions.out.trim().replace(/\n/g, ', ')}, node ${process.version})`);
 });
@@ -114,7 +135,7 @@ after(() => { if (!KEEP_WORK) fs.rmSync(work, { recursive: true, force: true, ma
 describe('positive', () => {
   for (const tier of ['T1', 'chain']) {
     test(`${tier}: build renders the overrides in app and SDK positions (SSR bundle)`, () => {
-      reset();
+      reset(TIERS[tier].setup);
       const b = build(tier);
       assert.equal(b.code, 0, b.out);
       const p = probe();
@@ -161,6 +182,17 @@ describe('positive', () => {
     rm('out-node');
   });
 
+  test('doctor: parcel scripts count as wired with the .parcelrc plugin, and as unwired without it', () => {
+    reset();
+    const ok = sh('npx stunt-double doctor');
+    assert.equal(ok.code, 0, ok.out);
+    assert.match(ok.out, /\.parcelrc: stunt-double\/parcel resolver present/);
+    rm('.parcelrc');
+    const bad = sh('npx stunt-double doctor');
+    assert.notEqual(bad.code, 0, bad.out);
+    assert.match(bad.out, /\[DOCTOR\] script "build" runs a tool without a stunt-double adapter/);
+  });
+
   test('T1: a warm .parcel-cache never replays an old override decision', () => {
     reset();
     const marks = () => { const t = bundleText('dist'); return { brand: /BRAND_PRICE/.test(t), sdk: /SDK_DEFAULT_PRICETAG/.test(t) }; };
@@ -176,7 +208,7 @@ describe('positive', () => {
   });
 
   test('chain: a warm .parcel-cache never replays an old override decision', () => {
-    reset();
+    reset('universal');
     const sdkDefault = () => /SDK_DEFAULT_PRICETAG/.test(bundleText('dist'));
     assert.equal(build('chain').code, 0);
     assert.equal(sdkDefault(), false);
@@ -242,14 +274,11 @@ const MUTATIONS = [
     bare: { passes: true, render: { sdk: { SDK_DEFAULT_BUTTON: '>=1' } } }, // R2: silent default inside Checkout
   },
   {
-    id: 'F6b', title: 'tool not wired: the registry placeholder instead of the link',
-    apply: () => {
-      const link = path.join(app, 'node_modules/@acme/core-slots');
-      fs.rmSync(link, { recursive: true, force: true });
-      fs.mkdirSync(link);
-      execFileSync('tar', ['xzf', path.join(packs, 'acme-core-slots-0.0.1.tgz'), '-C', link, '--strip-components=1']);
-    },
-    T1: { fails: /\[F6\] @acme\/core resolves @acme\/core-slots to/ }, chain: { fails: /\[F6\] @acme\/core resolves @acme\/core-slots/ },
+    // adapter setup: the plugin is not in .parcelrc; universal tier: the registry placeholder replaced the link
+    id: 'F6b', title: 'tool not wired (no plugin in .parcelrc / placeholder instead of the link)',
+    apply: (tier) => (tier === 'T1' ? rm('.parcelrc') : installPlaceholder()),
+    T1: { fails: /STUNT-DOUBLE-NOT-WIRED/ }, // RES: the placeholder's poisoned import
+    chain: { fails: /\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(the registry placeholder/ },
     bare: { fails: /STUNT-DOUBLE-NOT-WIRED/ },
   },
   {
@@ -259,7 +288,8 @@ const MUTATIONS = [
       fs.rmSync(link, { recursive: true, force: true });
       fs.cpSync(path.join(app, 'sdk-slots'), link, { recursive: true });
     },
-    T1: { fails: /\[F6\] @acme\/core resolves @acme\/core-slots to/ }, chain: { fails: /\[F6\]/ },
+    T1: null, // the adapter setup has no link to get wrong
+    chain: { fails: /\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots/ },
     bare: { fails: /Failed to resolve '\.\.\/\.\.\/src\/overrides\/(Button|PriceTag|Logo)\.tsx' from '\.\/node_modules\/@acme\/core-slots\/gen\// }, // the copied shims' relative paths break
   },
   {
@@ -299,7 +329,7 @@ const MUTATIONS = [
   {
     id: 'CFG-exports', title: '"@parcel/resolver-default": { "packageExports": true } missing',
     apply: () => editJson('package.json', (j) => { delete j['@parcel/resolver-default']; }),
-    T1: { fails: /Failed to resolve '@acme\/core\/original\/Button'/ }, // the plugin resolves sockets; originals need exports
+    T1: { fails: /\[CFG\] Parcel resolves without package "exports", so "@acme\/core\/original\/\*" cannot resolve/ },
     chain: { fails: /Failed to resolve '@acme\/core-slots\/(Button|PriceTag|Logo)'/ },
     bare: { fails: /Failed to resolve '@acme\/core-slots\/(Button|PriceTag|Logo)'/ },
   },
@@ -309,9 +339,10 @@ describe('mistake catalogue', () => {
   for (const m of MUTATIONS) {
     for (const tier of ['T1', 'chain', 'bare']) {
       const want = m[tier];
+      if (!want) continue;
       test(`${m.id} ${tier}: ${m.title} -> ${want.fails ? 'build fails' : want.runtime ? 'RUNTIME crash' : 'build passes'}`, () => {
-        reset();
-        m.apply();
+        reset(TIERS[tier].setup);
+        m.apply(tier);
         const b = build(tier);
         if (want.fails) {
           assert.notEqual(b.code, 0, `expected the build to fail:\n${b.out}`);
@@ -343,11 +374,11 @@ const DEV_CASES = {
   F1a: { break: () => write(BTN, orig(BTN).replace("props: SlotProps['Button'])", "props: SlotProps['Button'] & { tone: 'loud' })")), fix: () => write(BTN, orig(BTN)) },
 };
 const DEV_MODES = [
-  { name: 'T1 plugin: parcel serve', cmd: ['npx', 'parcel', 'serve'], prepare() {},
+  { name: 'T1 plugin: parcel serve', cmd: ['npx', 'parcel', 'serve'], setup: 'adapter',
     expect: { F2a: { error: /\[F2\] src\/overrides\/Buton\.tsx overrides unknown slot "Buton"/ }, F3: { error: /\[F3\] required slot "Logo" has no implementation/ }, F1a: { error: /\[F1\] Button \(src\/overrides\/Button\.tsx\): TS2322/ } } },
-  { name: 'universal: stunt-double watch -- parcel serve', cmd: ['npx', 'stunt-double', 'watch', '--', 'npx', 'parcel', 'serve'], prepare: () => rm('.parcelrc'),
+  { name: 'universal: stunt-double watch -- parcel serve', cmd: ['npx', 'stunt-double', 'watch', '--', 'npx', 'parcel', 'serve'], setup: 'universal',
     expect: { F2a: { error: /STUNT-DOUBLE-ERROR -- \[F2\] src overrides Buton\.tsx overrides unknown slot Buton/ }, F3: { error: /STUNT-DOUBLE-ERROR -- \[F3\] required slot Logo has no implementation/ }, F1a: { silent: true } } },
-  { name: 'universal: bare parcel serve', cmd: ['npx', 'parcel', 'serve'], prepare: () => rm('.parcelrc'),
+  { name: 'universal: bare parcel serve', cmd: ['npx', 'parcel', 'serve'], setup: 'universal',
     expect: { F2a: { silent: true }, F3: { error: /Failed to resolve '\.\.\/\.\.\/src\/overrides\/Logo\.tsx' from '\.\/sdk-slots\/gen\/Logo\.jsx'/ }, F1a: { silent: true } } },
 ];
 
@@ -364,8 +395,7 @@ for (const mode of DEV_MODES) {
     const APP_PAGE = /<div id=root><\/div>|<div id="root"><\/div>/;
 
     before(async () => {
-      reset();
-      mode.prepare();
+      reset(mode.setup);
       port = 41000 + Math.floor(Math.random() * 4000);
       srv = spawn(mode.cmd[0], [...mode.cmd.slice(1), '--target', 'app', '--port', String(port), '--host', '127.0.0.1'], { cwd: app, env: { ...process.env, FORCE_COLOR: '0', COLUMNS: '500', LINES: '50' }, detached: true });
       srv.stdout.on('data', (d) => { log += d; });
