@@ -211,10 +211,10 @@ async function step(fx, record, t, command) {
  */
 function assertSimplicityBar(fx, suite) {
   const pristine = new Set(listTree(fx.pristine));
-  const allowed = [...suite.outputs, suite.generatedDir].map((d) => `${d.replace(/\/$/, '')}/`);
+  const allowed = [...suite.outputs, suite.generatedDir, ...(fx.pm.keep ?? [])].map((d) => `${d.replace(/\/$/, '')}/`);
   const problems = [];
   for (const f of listTree(fx.app)) {
-    if (allowed.some((a) => f.startsWith(a))) continue;
+    if (allowed.some((a) => f.startsWith(a)) || (fx.pm.keep ?? []).includes(f)) continue; // keep: package-manager install state
     if (!pristine.has(f)) problems.push(`created ${f}`);
     else if (fs.readFileSync(path.join(fx.app, f), 'utf8') !== fs.readFileSync(path.join(fx.pristine, f), 'utf8')) problems.push(`modified ${f}`);
   }

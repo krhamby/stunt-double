@@ -1,7 +1,8 @@
-// Package managers x tiers: npm 10, pnpm 12 (link:), Yarn 4 Plug'n'Play (portal:), Bun 1.4 (workspace:*), each
-// with the Vite adapter and in the universal tier (no plugin; `stunt-double check && vite build`, and the
-// same build without the prefix = "bare"). Positive render + the override mistakes + SDK-variant mistakes,
-// with the observed per-setup expectations (bare cells encode the documented universal-tier gaps honestly).
+// The universal tier WITHOUT the `stunt-double check &&` prefix ("bare"), per package manager: what each override
+// mistake does when nothing validates. The harness suites (tests/{vite,pnpm,yarn,bun}.test.mjs) cover the adapter
+// tier and the chained universal build with the shared catalogue; this file pins the documented residuals of the
+// bare build (R1) under npm, pnpm, Yarn PnP and Bun, so a change in any of them is noticed, and checks that the
+// chained build still catches each one. It also pins Yarn's handling of an SDK that bundles its own React.
 // Run: npm run setup && node --test tests/package-managers.test.mjs   (needs the npm registry and Bun)
 import { describe, test, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,7 +42,7 @@ function build(pm, dir, name) {
 describe('package managers', { concurrency: CONCURRENCY }, () => {
 for (const pm of PMS) {
   describe(`${pm}`, { concurrency: 3, skip: !pms[pm] && `${pm} not available (install Bun 1.4 or set BUN_BIN)` }, () => {
-    for (const tier of ['adapter', 'universal']) {
+    for (const tier of ['universal']) {
       describe(`${pm} ${tier}`, { concurrency: 1 }, () => {
         let dir;
         before(async () => {
@@ -93,12 +94,11 @@ for (const pm of PMS) {
       });
     }
 
-    describe(`${pm} SDK variants (adapter)`, { concurrency: 3 }, () => {
+    if (pm === 'yarn') describe(`${pm} SDK variants (adapter)`, { concurrency: 3 }, () => {
       const variants = {
         // Yarn Berry ignores bundleDependencies: the "nested React" SDK has one React there, and builds correctly.
-        '1.0.0-nested-react': pm === 'yarn' ? { render: EXPECT_RENDER } : { fails: /\[F8\] "react" resolves to 2 copies/ },
-        '1.0.0-bad-relative': { fails: /\[F6\] \S*@acme\S*Checkout\.js imports the default of slot "Button" directly/ },
-        '2.0.0': { fails: /\[F2\] src\/overrides\/PriceTag\.tsx: slot "PriceTag" was RENAMED to "Price"[\s\S]*\[F3\] required slot "Footer"/ },
+        // the other variants are in the harness catalogue (tests/yarn.test.mjs), which skips F8 for this reason
+        '1.0.0-nested-react': { render: EXPECT_RENDER },
       };
       for (const [v, want] of Object.entries(variants)) {
         test(`@acme/core@${v}`, async () => {

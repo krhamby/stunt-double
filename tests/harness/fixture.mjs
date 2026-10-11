@@ -178,8 +178,9 @@ export class Fixture {
     fs.rmSync(path.join(this.dir, 'install.json'), { force: true });
     fs.rmSync(this.app, { recursive: true, force: true });
     copyFiles(this.pristine, listTree(this.pristine), this.app);
-    const r = await this.run(this.pm.install, { timeout: 600_000 });
+    const r = await this.run(this.pm.install, { timeout: 600_000, env: { NODE_OPTIONS: '' } }); // never a PnP runtime of the previous install
     if (r.code !== 0) throw new Error(`harness: "${this.pm.install}" failed in ${this.app} (exit ${r.code})\n${tail(r.output)}`);
+    await this.pm.afterInstall?.(this.app, run);
     this.note(`installed with ${this.pm.name} in ${r.ms} ms`);
     // keep what the package manager wrote to the lockfile, so resets do not fight it
     if (fs.existsSync(path.join(this.app, this.pm.lockfile))) fs.copyFileSync(path.join(this.app, this.pm.lockfile), path.join(this.pristine, this.pm.lockfile));
@@ -197,7 +198,7 @@ export class Fixture {
 
   /** Back to the pristine source (fresh-clone state: nothing generated, no build output, cold tool caches). */
   async reset() {
-    emptyDirExcept(this.app, ['node_modules']);
+    emptyDirExcept(this.app, ['node_modules', ...(this.pm.keep ?? [])]);
     copyFiles(this.pristine, listTree(this.pristine), this.app);
     for (const d of CACHE_DIRS) fs.rmSync(path.join(this.app, 'node_modules', d), { recursive: true, force: true });
     return this;
@@ -209,8 +210,9 @@ export class Fixture {
     this.files.json('package.json', (pkg) => { pkg.dependencies = { ...pkg.dependencies, [this.sdk.name]: spec }; });
     if (this.installedSdk === variant) return this;
     writeJson(path.join(this.dir, 'install.json'), { key: 'dirty: SDK swap in progress', sdk: null });
-    const r = await this.run(this.pm.install, { timeout: 600_000 });
+    const r = await this.run(this.pm.install, { timeout: 600_000, env: { NODE_OPTIONS: '' } }); // never a PnP runtime of the previous install
     if (r.code !== 0) throw new Error(`harness: installing ${this.sdk.name} ${variant} failed (exit ${r.code})\n${tail(r.output)}`);
+    await this.pm.afterInstall?.(this.app, run);
     this.note(`installed ${this.sdk.name} ${variant} in ${r.ms} ms`);
     this.installedSdk = variant;
     if (variant === this.sdk.version) writeJson(path.join(this.dir, 'install.json'), { key: this.installKey(), sdk: variant, at: new Date().toISOString() });
@@ -235,7 +237,7 @@ export class Fixture {
 
   // ---- commands ---------------------------------------------------------------------------------------
   run(command, opts = {}) {
-    return run(command, { cwd: this.app, ...opts });
+    return run(command, { cwd: this.app, ...opts, env: { ...this.pm.env?.(this.app), ...opts.env } });
   }
 
   note(msg) { this.log.push(msg); }
