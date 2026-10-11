@@ -28,7 +28,7 @@ Metro has no build-start hook, so the adapter does its checks in three places:
 | When | What | On a mistake |
 |---|---|---|
 | Config load | STA: `generate()` validates the overrides and writes the shims | Throws. `metro build`, `react-native bundle` and `expo export` exit 1 with the `[Fx]` lines |
-| Config load, one-shot bundle commands only | TYP: `tsc` on `src/stunt-double.check.ts`, run synchronously (TS 7: about 150 ms) | Throws, exit 1 |
+| Config load, one-shot bundle commands only | TYP: `tsc` on the generated `.stunt-double/check.ts`, run synchronously (TS 7: about 150 ms) | Throws, exit 1 |
 | `resolver.resolveRequest` | `@acme/core-slots/<Slot>` → `.stunt-double/gen/<Slot>.jsx`. Any earlier `resolveRequest` is chained for every other specifier | n/a |
 | `serializer.experimentalSerializerHook` | AUD: audits the built module graph for F6 (a default bundled from outside the allowed files, or a socket that resolved somewhere other than its shim) and F8 (duplicate bundled packages) | Throws, the bundle fails. Any previous hook is chained |
 
@@ -50,6 +50,7 @@ Other options:
 
 - An STA mistake does not stop the server. The shims are poisoned instead, so every bundle request returns HTTP 500 and the red box shows the `[Fx]` text.
 - A watcher regenerates the shims when you edit an override, so the next request recovers without a restart. This was verified in the test.
+- Metro itself stops watching files when the `CI` environment variable is set (`watch ?? !CI` in Metro's file map), so a dev server started under `CI=1` never picks up any edit, stunt-double's included.
 
 ## Versions verified
 
@@ -67,26 +68,28 @@ Other options:
 
 ## Which mistakes fail where
 
-Every row was observed by `tests/metro.test.mjs`.
+`npm test -- metro` (`tests/metro.test.mjs`) runs the whole shared catalogue (`tests/mutations/`) against `metro build` with the **default expectations**: there are no Metro-specific overrides and no residuals with the adapter. The type-gate cells are also run with TypeScript 5.9. Every mistake fails while Metro loads `metro.config.js`, and no bundle is written.
+
+The table below summarizes the main rows, including what Metro does without the adapter.
 
 - **Adapter:** `metro build` using `withStuntDouble`.
 - **Bare:** the same config without the wrapper, with `@acme/core-slots` linked to the generated package, so no stunt-double code runs (universal tier, no `stunt-double check &&`).
 
 | # | Mistake | Adapter (`metro build`) | `stunt-double check` | Bare Metro (no adapter, no chain) |
 |---|---|---|---|---|
-| F1 | Props incompatible with the contract | exit 1 at config load (type gate, one-shot commands only) | exit 1 | **silent**: bundles and renders |
+| F1 | Props incompatible with the contract | exit 1 at config load (type gate, one-shot commands only) | exit 1 | **silent**: bundles and renders¹ |
 | F2 | Typo `Buton.tsx` | exit 1 at config load | exit 1 | **silent**: the file is unused |
-| F3 | Required `Logo` missing | exit 1 at config load | exit 1 | exit 1: `Unable to resolve module ../../src/overrides/Logo.tsx` (RES, from the last generated shim) |
-| F4 | `Button.tsx` and `Button/index.tsx` | exit 1 at config load | exit 1 | **silent**: the previous shim decides |
+| F3 | Required `Logo` missing | exit 1 at config load | exit 1 | exit 1: `Unable to resolve module …/src/overrides/Logo.tsx` (RES, from the last generated shim)¹ |
+| F4 | `Button.tsx` and `Button/index.tsx` | exit 1 at config load | exit 1 | **silent**: the previous shim decides¹ |
 | F5 | Default export instead of named | exit 1 at config load (STA) | exit 1 | **runtime**: bundles, then React error #130 (element type undefined). Metro does not check named imports |
 | F6a | SDK imports `./original/Button.js` (variant `1.0.0-bad-relative`) | exit 1 at config load (dist scan) | exit 1 | **silent**: the SDK default renders inside `Checkout` |
 | F6b | Unwired: no adapter and no link, so the registry placeholder answers `@acme/core-slots` | not a mistake: builds and renders correctly with the placeholder installed | passes | exit 1: `Unable to resolve module ./STUNT-DOUBLE-NOT-WIRED -- …` |
-| F6g | App imports `@acme/core/original/Button` | exit 1 at config load | exit 1 | **silent**: the default renders at that call site |
+| F6g | App imports `@acme/core/original/Button` | exit 1 at config load | exit 1 | **silent**: the default renders at that call site¹ |
 | F6 (alias) | A resolver placed in front of the adapter sends a socket elsewhere | bundle fails (serializer-hook audit) | passes (nothing static to see) | silent |
 | F7 | Override imports its own slot | exit 1 at config load | exit 1 | **runtime**: infinite render until out of memory |
 | F8 | Nested React in the SDK (variant `1.0.0-nested-react`) | exit 1 at config load | exit 1 | **runtime**: `Cannot read properties of null (reading 'useContext')` |
 
-When the build fails at config load, no bundle is written.
+The bare cells for F5, F6a, F7 and F8 are pinned by the suite's "bare Metro" block: the build exits 0, the runtime outcome is shown, and the same build with `stunt-double check &&` fails. The suite's universal block also pins a typo'd new override that is silently unused, and shows that the `check &&` prefix catches F1a, F2a, F3a, F5a and F7b. ¹ Observed in the pre-harness run of the suite; not pinned now.
 
 On the dev server, the same STA rows appear as HTTP 500 plus a red box. F1 is only logged.
 
