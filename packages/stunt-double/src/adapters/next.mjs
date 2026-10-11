@@ -21,8 +21,11 @@ import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, webpackGraph } from '../core/audit.mjs';
 import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
+import { watchProject } from '../core/watch.mjs';
+import { DEFAULTS } from '../core/config.mjs';
 
 const NAME = 'stunt-double';
+const OPTIONS = new Set(['typecheck', 'audit', 'watch', 'root', 'configFile', ...Object.keys(DEFAULTS)]);
 
 /**
  * @template T
@@ -34,15 +37,16 @@ export function withStuntDouble(nextConfig = {}, opts = {}) {
   if (typeof nextConfig === 'function')
     return /** @type {any} */ (async (phase, ...rest) => {
       const c = await nextConfig(phase, ...rest);
-      return phase === PHASE_PRODUCTION_SERVER ? c : wrap(c, opts);
+      return phase === PHASE_PRODUCTION_SERVER ? c : wrap(c, opts, phase === PHASE_DEVELOPMENT_SERVER);
     });
-  return /** @type {any} */ (isNextStart() ? nextConfig : wrap(nextConfig, opts));
+  return /** @type {any} */ (isNextStart() ? nextConfig : wrap(nextConfig, opts, process.env.NODE_ENV === 'development'));
 }
 
 // `next start` serves a build that was validated when it was built: nothing is bundled any more, so it must not
 // depend on (or rewrite) the current source tree. Detected exactly through `phase` for config functions, and for
 // config objects only when the process is unambiguously `next start` (anything else stays strict: fails loud).
 const PHASE_PRODUCTION_SERVER = 'phase-production-server';
+const PHASE_DEVELOPMENT_SERVER = 'phase-development-server';
 function isNextStart() {
   const [, bin = '', cmd] = process.argv;
   return cmd === 'start' && /[\\/]next(?:[\\/]dist[\\/]bin[\\/]next|\.js|\.cmd)?$/.test(bin);
@@ -55,12 +59,17 @@ function fail(e) {
   throw e;
 }
 
-function wrap(nextConfig = {}, opts = {}) {
-  try { return wrapUnsafe(nextConfig, opts); } catch (e) { fail(e); }
+function wrap(nextConfig = {}, opts = {}, dev = false) {
+  try { return wrapUnsafe(nextConfig, opts ?? {}, dev); } catch (e) { fail(e); }
 }
 
-function wrapUnsafe(nextConfig, opts) {
-  const { audit = true, typecheck = true, ...genOpts } = opts;
+function wrapUnsafe(nextConfig, opts, dev) {
+  const unknown = Object.keys(opts).filter((k) => !OPTIONS.has(k));
+  if (unknown.length) {
+    const lines = unknown.map((k) => `[CFG] unknown withStuntDouble() option "${k}". Known options: ${[...OPTIONS].join(', ')}.`);
+    throw new StuntDoubleError(lines.join('\n'), lines);
+  }
+  const { audit = true, typecheck = true, watch = true, ...genOpts } = opts;
   const root = path.resolve(genOpts.root ?? process.cwd());
   const tsconfigPath = nextConfig.typescript?.tsconfigPath;
   const p = generate({ ...(tsconfigPath && !genOpts.tsconfig ? { tsconfig: tsconfigPath } : {}), ...genOpts, root, onError: 'throw' });
@@ -72,6 +81,8 @@ function wrapUnsafe(nextConfig, opts) {
     process.env.__STUNT_DOUBLE_NEXT_WARNED = '1';
     console.warn(formatWarnings(p, otherWarnings));
   }
+
+  if (dev && watch !== false) startDevWatcher(p, typecheck);
 
   const slotPkg = p.sdk.slotPackage;
   // Turbopack: './'-relative target, posix separators (an absolute target is silently ignored).
@@ -103,6 +114,27 @@ function wrapUnsafe(nextConfig, opts) {
       return withWebpackSlots(c, p, { audit, dev: !!ctx?.dev });
     },
   };
+}
+
+// next dev: Turbopack has no plugin hooks, so the adapter watches the overrides itself (the same watcher as
+// `stunt-double watch`): add / remove / swap rewrite shim content, which Turbopack and webpack pick up; mistakes
+// poison the shims (Next's overlay + HTTP 500 carry the [Fx] text). One watcher per project and process; it never
+// keeps the process alive. Contract errors (next dev does not type-check) are printed to the terminal.
+const watchers = new Map();
+function startDevWatcher(p, typecheck) {
+  if (watchers.has(p.root)) return;
+  const gate = (cur) => {
+    if (typecheck === false) return;
+    runTypeGate(cur).then((r) => { if (!r.ok) console.error(r.message); }, () => {});
+  };
+  watchers.set(p.root, watchProject(p, {
+    onChange: (next, _prev, e) => {
+      if (e) return console.error(`${NAME}: ${e.message}`);
+      if (next.problems.length) console.error(formatProblems(next));
+      else gate(next);
+    },
+  }));
+  gate(p);
 }
 
 // The piece of stunt-double/webpack that Next needs (no type gate: next build type-checks the check file).
