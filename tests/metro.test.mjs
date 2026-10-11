@@ -5,10 +5,12 @@
 // Three ways to bundle the same project, for every mistake in the F1-F9 catalogue:
 //   adapter  metro build with metro.config.js = withStuntDouble(getDefaultConfig(__dirname))   (T1)
 //   check    stunt-double check                                                                 (the CI gate)
-//   bare     metro build with the SAME config minus withStuntDouble(), with node_modules/@acme/core-slots
-//            linked to sdk-slots/ INSIDE THE TEST WORKSPACE (the universal tier, T0 bare)
-// The example itself depends on the registry placeholder (a tarball standing in for what npm auto-installs for
-// the SDK's peer): adapter cells prove the adapter needs no link.
+//   bare     metro build with the SAME config minus withStuntDouble(), in the universal tier set up INSIDE THE
+//            TEST WORKSPACE ONLY: a "file:./sdk-slots" dependency + stub, node_modules/@acme/core-slots linked
+//            to it, shims from the last successful `stunt-double gen` (T0 bare: no stunt-double code at build)
+// The example itself is the 3-step setup (stunt-double + one line in metro.config.js + src/overrides): npm
+// installs the registry placeholder for @acme/core-slots (here via package.json "overrides" from .packs/).
+// Generated paths come from the core's project object, never hard-coded.
 // "bare" rows record what Metro does natively, so the docs table can say exactly where a mistake surfaces.
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,7 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseRenderOutput, summarize, compareRender } from './harness/markers.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -57,17 +59,42 @@ const sdkDir = () => path.join(work, 'node_modules/@acme/core');
 const slotsLink = () => path.join(work, 'node_modules/@acme/core-slots');
 const restoreProject = () => {
   fs.rmSync(path.join(work, 'src'), { recursive: true, force: true });
-  fs.cpSync(path.join(example, 'src'), path.join(work, 'src'), { recursive: true, filter: (s) => !s.endsWith('stunt-double.check.ts') });
+  fs.cpSync(path.join(example, 'src'), path.join(work, 'src'), { recursive: true });
 };
+// The core's view of the workspace (no writes): genDir, shimFile(), checkTsconfig, rel() ...
+let core;
+const project = () => core.generate({ root: work, write: false, onError: 'return' });
 // As installed: baseline SDK + the registry placeholder answering @acme/core-slots.
 const restoreInstall = () => {
   extract(tgz('acme-core-1.0.0.tgz'), sdkDir());
   extract(tgz('acme-core-slots-0.0.1.tgz'), slotsLink());
 };
-// Universal tier (test workspace only): link the slot package to the generated sdk-slots/.
-const linkSlots = () => {
+// Universal tier, test workspace only: declare + link the slot package; the core then generates INTO it.
+const STUB = { name: '@acme/core-slots', version: '0.0.0', private: true, type: 'module', sideEffects: false,
+  exports: { './package.json': './package.json', './*': { types: './gen/*.d.ts', default: './gen/*.jsx' } } };
+let installedPkg;
+const universalOn = () => {
+  const pkg = JSON.parse(installedPkg);
+  pkg.dependencies['@acme/core-slots'] = 'file:./sdk-slots';
+  write('package.json', JSON.stringify(pkg, null, 2) + '\n');
+  write('sdk-slots/package.json', JSON.stringify(STUB, null, 2) + '\n');
   fs.rmSync(slotsLink(), { recursive: true, force: true });
   fs.symlinkSync(path.relative(path.dirname(slotsLink()), path.join(work, 'sdk-slots')), slotsLink(), 'junction');
+};
+const universalOff = () => {
+  write('package.json', installedPkg);
+  extract(tgz('acme-core-slots-0.0.1.tgz'), slotsLink());
+};
+// The universal tier's shims as the last successful `stunt-double gen` left them (postinstall / a previous run).
+const universalBaseline = () => {
+  universalOn();
+  const r = cli('gen');
+  assert.equal(r.code, 0, `baseline gen (universal tier):\n${r.out}`);
+  const p = project();
+  assert.equal(p.tier, 'universal');
+  assert.equal(p.rel(p.genDir), 'sdk-slots/gen', 'the core generates into the linked package');
+  assert.ok(fs.existsSync(p.shimFile('Button')));
+  universalOff();
 };
 const edit = (rel, fn) => { const f = path.join(work, rel); fs.writeFileSync(f, fn(fs.readFileSync(f, 'utf8'))); };
 const write = (rel, text) => { const f = path.join(work, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
@@ -78,16 +105,18 @@ const GOOD = {
   sdk: { 'BRAND_BUTTON(dark)': 3, 'SDK_DEFAULT_BUTTON(in-cart)': 3, BRAND_PRICE: 3, BRAND_LOGO: 1, SDK_DEFAULT_PRICETAG: 0 },
 };
 
-before(() => {
+before(async () => {
   for (const f of ['acme-core-1.0.0.tgz', 'acme-core-1.0.0-bad-relative.tgz', 'acme-core-1.0.0-nested-react.tgz', 'acme-core-slots-0.0.1.tgz', 'stunt-double-0.1.0.tgz'])
     assert.ok(fs.existsSync(tgz(f)), `.packs/${f} is missing: run \`npm run setup\` at the repository root first`);
   work = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-metro-'));
-  fs.cpSync(example, work, { recursive: true, filter: (s) => !/(^|[\\/])(node_modules|dist)([\\/]|$)|sdk-slots[\\/]gen|stunt-double\.check\.ts$/.test(path.relative(example, s)) });
+  fs.cpSync(example, work, { recursive: true, filter: (s) => !/(^|[\\/])(node_modules|dist|\.stunt-double)([\\/]|$)/.test(path.relative(example, s)) });
   edit('package.json', (s) => s.replaceAll('../../.packs/', packs.split(path.sep).join('/') + '/'));
-  const r = sh('npm', ['install', '--no-package-lock', '--no-audit', '--no-fund'], { shell: process.platform === 'win32', timeout: 600_000 });
+  const r = sh('npm', ['install', '--no-audit', '--no-fund'], { shell: process.platform === 'win32', timeout: 600_000 });
   assert.equal(r.code, 0, `npm install failed:\n${r.out}`);
+  installedPkg = fs.readFileSync(path.join(work, 'package.json'), 'utf8');
+  core = await import(pathToFileURL(path.join(work, 'node_modules/stunt-double/src/core/index.mjs')).href);
   assert.ok(fs.existsSync(path.join(slotsLink(), 'not-wired.js')), 'the example installs the registry placeholder');
-  // T0 bare: the same config without the wrapper (resolution goes through the sdk-slots/ link only).
+  // T0 bare: the same config without the wrapper (resolution goes through the linked slot package only).
   write('metro.bare.config.js', fs.readFileSync(path.join(work, 'metro.config.js'), 'utf8')
     .replace(/^const \{ withStuntDouble \}.*\n/m, '')
     .replace(/module\.exports = withStuntDouble\((.*)\);/, 'module.exports = $1;'));
@@ -132,22 +161,28 @@ describe('positive', () => {
     assert.match(bundle, /SDK_DEFAULT_BUTTON/);
   });
 
-  test('a passing build regenerates the shims and runs the type gate (no stale state needed)', () => {
+  test('a passing build generates everything from scratch and runs the type gate (no init, no stale state)', () => {
     restoreProject();
-    fs.rmSync(path.join(work, 'sdk-slots/gen'), { recursive: true, force: true });
-    fs.rmSync(path.join(work, 'src/stunt-double.check.ts'), { force: true });
+    const p = project();
+    assert.equal(p.tier, 'adapter');
+    fs.rmSync(p.outDir, { recursive: true, force: true });
     const r = build();
     assert.equal(r.code, 0, r.out);
-    assert.ok(fs.existsSync(path.join(work, 'sdk-slots/gen/Button.jsx')));
-    assert.ok(fs.existsSync(path.join(work, 'sdk-slots/gen/tsconfig.check.json')), 'the type gate wrote its tsconfig');
+    assert.ok(fs.existsSync(p.shimFile('Button')));
+    assert.ok(fs.existsSync(p.checkFile));
+    assert.ok(fs.existsSync(p.checkTsconfig), 'the type gate wrote its tsconfig');
+    assert.ok(fs.existsSync(path.join(p.outDir, '.gitignore')), 'the output directory ignores itself');
   });
 
-  test('T0 bare: Metro follows the sdk-slots link natively and renders the same', () => {
-    restoreProject(); linkSlots();
-    assert.equal(cli('gen').code, 0);
-    const r = build('metro.bare.config.js');
-    assert.equal(r.code, 0, r.out);
-    assert.deepEqual(compareRender(render(), GOOD), []);
+  test('T0 bare: Metro follows a linked slot package natively and renders the same', () => {
+    restoreProject();
+    universalBaseline();
+    universalOn();
+    try {
+      const r = build('metro.bare.config.js');
+      assert.equal(r.code, 0, r.out);
+      assert.deepEqual(compareRender(render(), GOOD), []);
+    } finally { universalOff(); }
   });
 
   test('stunt-double check passes', () => {
@@ -236,8 +271,8 @@ const MUTATIONS = [
 describe('mutations', () => {
   for (const m of MUTATIONS) {
     describe(`${m.id}: ${m.title}`, () => {
-      before(() => { restoreInstall(); restoreProject(); assert.equal(cli('gen').code, 0, 'baseline gen'); m.apply(); });
-      after(() => { restoreInstall(); restoreProject(); });
+      before(() => { restoreInstall(); restoreProject(); universalBaseline(); m.apply(); });
+      after(() => { universalOff(); restoreInstall(); restoreProject(); });
 
       test(m.adapter === 'pass' ? 'adapter: metro build passes and renders the overrides' : 'adapter: metro build exits non-zero with the [Fx] line', () => {
         const r = build();
@@ -257,7 +292,7 @@ describe('mutations', () => {
       test(`T0 bare (no adapter): ${m.bare.build ? 'fails at resolve time' : m.bare.crash ? 'bundles, then crashes at RUNTIME' : 'bundles silently'}`, () => {
         // the adapter test above may have poisoned nothing (throw mode) but re-generation is part of the mutation
         // for F3: bare Metro sees the shims of the last successful gen, exactly like a CI without the chain.
-        if (m.bareLink !== false) linkSlots();
+        if (m.bareLink !== false) universalOn();
         const r = build('metro.bare.config.js');
         if (m.bare.build) {
           assert.notEqual(r.code, 0, r.out.slice(-2000));
@@ -289,7 +324,7 @@ module.exports = { ...sd, resolver: { ...sd.resolver, resolveRequest(ctx, name, 
     const r = build('metro.alias.config.js');
     assert.notEqual(r.code, 0, r.out.slice(-2000));
     assert.match(r.out, /\[F6\] node_modules\/@acme\/core\/dist\/Checkout\.js imports the SDK default of slot "Button"/);
-    assert.match(r.out, /\[F6\] @acme\/core imports @acme\/core-slots\/Button but sdk-slots\/gen\/Button\.jsx is not in the bundle/);
+    assert.ok(r.out.includes(`[F6] @acme/core imports @acme/core-slots/Button but ${project().rel(project().shimFile('Button'))} is not in the bundle`), r.out.slice(-2000));
   });
 
   test('chains a previous resolveRequest for every other specifier', () => {
