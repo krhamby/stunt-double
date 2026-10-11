@@ -8,6 +8,10 @@ import path from 'node:path';
 import { chromium } from 'playwright-core';
 
 const dir = path.resolve(process.argv[2] ?? 'build');
+if (!fs.existsSync(path.join(dir, 'index.html'))) {
+  console.error(`render probe: ${path.join(dir, 'index.html')} does not exist (run the build first)`);
+  process.exit(1);
+}
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -17,6 +21,9 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+
+// An override that renders its own slot (F7 without the adapter) never settles: report it, do not hang.
+setTimeout(() => { console.error('render probe: the page did not settle within 30 s (infinite render?)'); process.exit(1); }, 30_000).unref();
 
 const executablePath = process.env.CHROMIUM_PATH ?? (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 const browser = await chromium.launch({ executablePath });
