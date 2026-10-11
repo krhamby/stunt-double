@@ -6,6 +6,8 @@
 //   npm run setup && node --test tests/farm.test.mjs
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { bundlerSuite } from './cli-bundlers/suite.mjs';
 import { run, write } from './cli-bundlers/lib.mjs';
 import { STA, DEFAULT_PRICE, F1C_RENDER, chainOf } from './cli-bundlers/shared.mjs';
@@ -52,6 +54,8 @@ bundlerSuite({
     'F6b': { t1: 'pass', chain: { fail: /STUNT-DOUBLE-NOT-WIRED/ }, bare: { fail: /STUNT-DOUBLE-NOT-WIRED/ } },
     'F6g': { ...STA('[F6]'), bare: 'pass' },
     'F6h': { t1: 'pass', chain: 'pass', render: DEFAULT_PRICE, bare: { fail: /Can not resolve `\.\.\/\.\.\/src\/overrides\/PriceTag\.tsx`/ } },
+    // bare: the shim still says "no override": the SDK default renders silently (R1); t1 / chain regenerate.
+    'F6h-add': { t1: 'pass', chain: 'pass', bare: 'pass', bareProbe: { sdk: { SDK_DEFAULT_PRICETAG: 3, BRAND_PRICE: 0 } } },
     'F7': { ...STA('[F7]'), bare: 'pass', bareProbe: 'crash' },
     'F7-transitive': { ...STA('[F7]'), bare: 'pass', bareProbe: 'crash' },
     'F8': { ...STA('[F8]'), bare: 'pass' },
@@ -66,6 +70,15 @@ bundlerSuite({
         const r = run('npx', ['farm', 'build'], dir);
         assert.equal(r.code, 0, ws.show(r));
         assert.match(r.out, /stunt-double: post-bundle audit skipped, this host has no module-graph API/, ws.show(r));
+      });
+
+      test('farm start refuses to start on an injection error, with the [Fx] line', () => {
+        const dir = ws.project('dev-typo', (d) => fs.copyFileSync(path.join(d, 'src/overrides/Button.tsx'), path.join(d, 'src/overrides/Buton.tsx')));
+        const r = run('npx', ['farm', 'start', '--port', '9791'], dir, { timeout: 60_000 });
+        assert.equal(r.signal, null, `farm start kept running instead of refusing to start\n${ws.show(r)}`);
+        assert.notEqual(r.code, 0, ws.show(r));
+        assert.match(r.out, /\[F2\] src\/overrides\/Buton\.tsx overrides unknown slot "Buton"/, ws.show(r));
+        assert.match(r.out, /Failed to start the server/, ws.show(r));
       });
     });
   },

@@ -2,7 +2,7 @@
 // states, per mistake and per command, what it OBSERVES; nothing here knows about a particular bundler.
 import fs from 'node:fs';
 import path from 'node:path';
-import { packs, read, write, readJson, writeJson } from './lib.mjs';
+import { packs, read, write, readJson, writeJson, run } from './lib.mjs';
 
 const BUTTON = 'src/overrides/Button.tsx';
 const edit = (dir, rel, fn) => write(dir, rel, fn(read(dir, rel)));
@@ -81,6 +81,15 @@ export class Logo extends Component<SlotProps['Logo']> {
     } },
   { id: 'F6h', what: 'override deleted without regenerating (PriceTag.tsx removed, old shim left)',
     apply: (d) => fs.rmSync(path.join(d, 'src/overrides/PriceTag.tsx')) },
+  { id: 'F6h-add', what: 'override added without regenerating (shims generated while PriceTag.tsx was absent)',
+    apply: (d) => {
+      const file = path.join(d, 'src/overrides/PriceTag.tsx');
+      const text = fs.readFileSync(file, 'utf8');
+      fs.rmSync(file);
+      const r = run(process.execPath, [path.join(d, 'node_modules/stunt-double/bin/stunt-double.mjs'), 'gen'], d);
+      if (r.code !== 0) throw new Error(r.out);
+      fs.writeFileSync(file, text);
+    } },
   { id: 'F7', what: 'override imports its own slot through the barrel',
     apply: (d) => edit(d, BUTTON, (s) => s.replace("from '@acme/core/original/Button'", "from '@acme/core'")) },
   { id: 'F7-transitive', what: 'override -> helper -> namespace import of the barrel uses Sdk.Button',

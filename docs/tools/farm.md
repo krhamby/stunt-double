@@ -26,13 +26,26 @@ For an SSR build, set `output.targetEnv: 'node'` and keep `@acme/core` bundled (
 
 "Build" means `farm build` exits non-zero with the message shown. The IDs are explained in [DESIGN.md §2](../DESIGN.md#2-failure-catalogue-the-north-star).
 
-| Mistake | `farm build` with `stuntDouble()` | `farm start` (dev) |
-|---|---|---|
-| F1 props don't fit the contract; F9c async client override | build (type gate at `buildStart`) | logged in the terminal shortly after start (non-blocking) |
-| F2, F2b, F4, F5, F6a, F6g (import scan), F7, F8 (install preflight) | build (`buildStart`) | refuses to start; while running, the shims are poisoned and Farm logs the `[Fx]` lines plus its own resolve error; fixing the file recovers |
-| F3 required slot missing; F9b `server-only` in a client slot | build: the `[F3]` / `[F9]` line, next to Farm's own resolve error for the same file | same as above |
-| F6b tool not wired at all | n/a (the placeholder fails resolution without the plugin) | |
-| F6g a plugin resolves a socket elsewhere; F8 duplicate copies in the bundle | **not checked under Farm** (no audit, see below) | |
+| Mistake | `farm build` with `stuntDouble()` | `stunt-double check && farm build` (no plugin) | bare Farm, link only, no chain |
+|---|---|---|---|
+| F1 props don't fit the contract; F9c async client override | build (type gate at `buildStart`) | `check` | **passes** |
+| F1c `forwardRef`, `memo`, class overrides (must pass) | passes | passes | passes |
+| F2a typo'd or stray override file | build | `check` | passes (file unused) |
+| F2b slot renamed / new required slot in an SDK upgrade | build, with the rename hint | `check` | build: ``Can not resolve `@acme/core-slots/Price` `` |
+| F3 required slot missing | build: `[F3]` next to Farm's own resolve error | `check` | build: resolve error (old shim) |
+| F4 two files claim a slot | build | `check` | passes |
+| F5 wrong export name | build | `check` | **passes: fails only at runtime** (Farm does not check missing exports) |
+| F6a SDK imports a default directly | build | `check` | passes: the SDK default renders there (R2) |
+| F6b `@acme/core-slots` not linked (registry placeholder) | passes: the plugin is the wiring | build: `STUNT-DOUBLE-NOT-WIRED` | build: same |
+| F6g app code imports `@acme/core/original/X` | build (import scan) | `check` | passes |
+| F6g a plugin resolves a socket elsewhere | **not checked under Farm** (no audit) | not checked | n/a |
+| F6h override deleted without regenerating | regenerated: the SDK default renders, correctly | regenerated | build: resolve error (old shim) |
+| F6h override added without regenerating | regenerated | regenerated | passes: **the SDK default renders** (R1) |
+| F7 override imports its own slot | build | `check` | passes: infinite render at runtime |
+| F8 duplicate React / SDK | build (install preflight only, no bundle audit) | `check` | passes |
+| F9b `server-only` in a client slot | build: `[F9]` next to Farm's resolve error | `check` | fails only because `server-only` is not installed |
+
+`farm start` (dev): an injection error at start makes the dev server refuse to start with the `[Fx]` lines. While it runs, the plugin regenerates on every change in `src/overrides`: a mistake poisons the shims, Farm logs the `[Fx]` lines and its own resolve error, and fixing the file recovers; contract (F1) errors are logged in the terminal shortly after start, without blocking (both observed manually, not covered by the test suite).
 
 ## Known gaps
 

@@ -56,6 +56,8 @@ bundlerSuite({
     'F6b': { t1: 'pass', chain: { fail: /STUNT-DOUBLE-NOT-WIRED/ }, bare: { fail: /STUNT-DOUBLE-NOT-WIRED/ } },
     'F6g': { ...STA('[F6]'), bare: 'pass' },
     'F6h': { t1: 'pass', chain: 'pass', render: DEFAULT_PRICE, bare: { fail: /UNRESOLVED_IMPORT Could not resolve "\.\.\/\.\.\/src\/overrides\/PriceTag\.tsx"/ } },
+    // bare: the shim still says "no override": the SDK default renders silently (R1); t1 / chain regenerate.
+    'F6h-add': { t1: 'pass', chain: 'pass', bare: 'pass', bareProbe: { sdk: { SDK_DEFAULT_PRICETAG: 3, BRAND_PRICE: 0 } } },
     'F7': { ...STA('[F7]'), bare: 'pass', bareProbe: 'crash' },
     'F7-transitive': { ...STA('[F7]'), bare: 'pass', bareProbe: 'crash' },
     'F8': { ...STA('[F8]'), bare: 'pass' },
