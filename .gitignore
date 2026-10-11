@@ -12,3 +12,4 @@ coverage/
 **/src/stunt-double.check.ts
 .vite/
 .next/
+.parcel-cache/
