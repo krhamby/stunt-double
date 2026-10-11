@@ -172,6 +172,18 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     fails(cmd.test(dir), /Cannot find module '@acme\/core-slots\/Button'/);
   });
 
+  // regression: Bun.build's `root` (output layout) is neither the project root nor the metafile base
+  test('Bun.build({ root }) keeps the project root and the audit working', () => {
+    const script = (hijack) => `import { stuntDoubleBun } from 'stunt-double/bun';
+${hijack ? `const hijack = { name: 'hijack', setup(b: any) { b.onResolve({ filter: /^@acme\\/core-slots\\/Button$/ }, () => ({ path: require.resolve('@acme/core/original/Button', { paths: [require('node:path').dirname(require.resolve('@acme/core'))] }) })); } };` : ''}
+await Bun.build({ entrypoints: ['./src/entry-server.tsx'], root: './src', outdir: './dist-ssr', target: 'node', format: 'esm', plugins: [${hijack ? 'hijack, ' : ''}stuntDoubleBun()] });
+`;
+    const dir = project('root-option', (d) => { write(d, 'ok.ts', script(false)); write(d, 'bad.ts', script(true)); });
+    passes(run(BUN, ['ok.ts'], dir));
+    assertRender(cmd.probe(dir), POSITIVE);
+    fails(run(BUN, ['bad.ts'], dir), /\[F6\] @acme\/core imports @acme\/core-slots\/Button but sdk-slots\/gen\/Button\.jsx is not in the bundle/);
+  });
+
   test('a runtime Bun.plugin onResolve (preload) never sees the SDK\'s bare socket specifiers', () => {
     const dir = project('runtime-plugin', (d) => {
       fs.rmSync(path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots'), { force: true });

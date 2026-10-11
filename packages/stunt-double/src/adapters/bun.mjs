@@ -50,7 +50,8 @@ export function stuntDoubleBun(opts = {}) {
   return {
     name: PLUGIN,
     setup(build) {
-      const root = path.resolve(opts.root ?? build.config?.root ?? process.cwd());
+      // Not build.config.root: that is Bun's output-layout root (default: the entrypoints' common ancestor).
+      const root = path.resolve(opts.root ?? process.cwd());
       // Bun.build always has entrypoints; the static dev server's config has none (it bundles HTML routes).
       if (build.config && !build.config.entrypoints) return serveMode(build, root);
       // generate() is synchronous and cheap; setup may run once per target, the result is identical.
@@ -72,8 +73,8 @@ export function stuntDoubleBun(opts = {}) {
       build.onEnd((result) => {
         if (audit === false || !p?.sdk || !result?.success) return;
         if (!result.metafile) fail(`stunt-double: Bun.build returned no metafile, so the post-bundle audit could not run (pass audit: false to skip it).`);
-        const cwd = build.config?.root ? path.resolve(build.config.root) : process.cwd();
-        const problems = auditGraph(p, bunGraph(result.metafile, cwd));
+        // metafile keys are relative to the process cwd, whatever `root` is [V 1.4.2]
+        const problems = auditGraph(p, bunGraph(result.metafile, process.cwd()));
         if (!problems.length) return;
         removeOutputs(result.outputs, build.config?.outdir);
         fail(formatProblems(p, problems), problems);
