@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/@acme/core/stunt-double.schema.json",
+  "sdk": "@acme/core",
+  "overridesDir": "app/overrides",
+  "checkFile": "app/stunt-double.check.ts",
+  "sourceDirs": ["app"]
+}
