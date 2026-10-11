@@ -6,12 +6,15 @@ import { createRequire } from 'node:module';
 import { readJson, real, findPackageJson } from './util.mjs';
 
 const LINK_FORMS = /^(file:|link:|portal:|workspace:)/;
+// "file:<tarball>" installs a packed copy (e.g. the registry placeholder from a local .tgz): not a link.
+const TARBALL = /\.(tgz|tar\.gz|tar)$/i;
 
 /** Is the slot package declared as a dependency of the project (universal tier)? */
 export function linkDeclaration(root, slotPackage, slotsDir) {
   const pkg = readJson(path.join(root, 'package.json')) ?? {};
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
     const spec = pkg[field]?.[slotPackage];
+    if (spec && spec.startsWith('file:') && TARBALL.test(spec)) return null; // the placeholder from a tarball: adapter-only project
     if (spec) return { field, spec, linkForm: LINK_FORMS.test(spec) };
   }
   const ws = Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces?.packages ?? [];
