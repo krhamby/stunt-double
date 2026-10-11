@@ -50,7 +50,7 @@ SDK barrel and render `<Checkout>` while your hook-using override runs on the cl
 | When | What |
 |---|---|
 | Config load (`next build`, `next dev`) | Validates the overrides and writes the shims. **Any injection mistake throws**, so the command exits 1 before compiling |
-| `transpilePackages` | Adds the SDK (and brand layers). Without it the Pages Router would load `@acme/core` natively in Node, where slots cannot be redirected |
+| `transpilePackages` | Adds the SDK, brand layers and the slot package. Without it the Pages Router would load them natively in Node, where slots cannot be redirected (with the registry placeholder installed, `next build --webpack` would load it and fail) |
 | Turbopack | One `turbopack.resolveAlias` entry: `'@acme/core-slots/*': './sdk-slots/gen/*.jsx'`. The target is relative on purpose: Turbopack silently ignores absolute targets |
 | webpack (`--webpack`) | Exact aliases to the shims, `exportsPresence: 'error'`, the decision fingerprint folded into the persistent cache version, and a post-bundle audit (bypassed sockets, duplicate SDK) reported as a build error |
 | Type gate (`next build` only) | `compiler.runAfterProductionCompile` runs the slot contract check on both bundlers; a failure fails the build with `[F1]` / `[F9]` lines. Your own `runAfterProductionCompile` still runs first. `typescript.ignoreBuildErrors` does not switch it off |

@@ -81,7 +81,9 @@ function wrapUnsafe(nextConfig, opts) {
 
   return {
     ...nextConfig,
-    transpilePackages: [...new Set([...(nextConfig.transpilePackages ?? []), ...p.packages])],
+    // The slot package too: when a registry placeholder sits in node_modules/<slotPackage>, webpack's server
+    // build (Pages Router) would otherwise externalize the socket and Node would load the placeholder.
+    transpilePackages: [...new Set([...(nextConfig.transpilePackages ?? []), ...p.packages, slotPkg])],
     turbopack: {
       ...nextConfig.turbopack,
       resolveAlias: { ...nextConfig.turbopack?.resolveAlias, [`${slotPkg}/*`]: `${rel}/*.jsx` },
