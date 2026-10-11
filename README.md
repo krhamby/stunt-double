@@ -140,7 +140,7 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 
 Status key:
 
-- **verified** means a toolchain suite in `tests/` runs the whole shared mistake catalogue against a real app built with that tool: the production build, a render of the result (SSR, a prerendered page, or Chromium), TypeScript 7 and 5.9, and the universal tier.
+- **verified** means a toolchain suite in `tests/` builds a real app with that tool and renders the result (SSR, a prerendered page, or Chromium), then runs every mistake whose outcome depends on the tool (resolution, config guards, the post-bundle audit, regeneration at each start, a smoke test of each stage) and the universal tier. The Vite suite is the reference: it runs the whole shared mistake catalogue, under TypeScript 7 and 5.9.
 - **v0.1.0** means the adapter exists and shares the Vite plugin's code, without a suite of its own.
 - **designed** means the tool uses an existing adapter through its own config hook, as in [DESIGN.md §7](docs/DESIGN.md#7-per-tool-integration), not yet run in a suite.
 - **planned** means the adapter is designed but not written; importing it fails loudly, never silently.

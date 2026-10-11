@@ -9,7 +9,7 @@
 // In the universal tier (a link dependency on the slot package) the outDir is the linked stub's directory.
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig, detectPackageManager, detectPnP, detectRsc } from './config.mjs';
+import { loadConfig, detectPackageManager, detectPnP, findPnpFile, detectRsc } from './config.mjs';
 import { loadSdk, loadLayers, TOOL_VERSION } from './manifest.mjs';
 import { scanOverrides } from './scan.mjs';
 import { buildPlan } from './plan.mjs';
@@ -75,6 +75,7 @@ function resolveOutDir({ root, cfg, configSource, overridesDir, sdk, rel }) {
  * @param {'throw'|'poison'|'return'} [opts.onError]  what to do with problems (default 'return')
  * @param {boolean} [opts.write]        false = validate only, write nothing (default true)
  * @param {string} [opts.configFile]    explicit config file
+ * @param {string[]} [opts.optionProblems]  [CFG] lines of an adapter's options (see adapterOptions())
  *  ...any stunt-double.config.json key overrides the file
  */
 export function generate(opts = {}) {
@@ -104,9 +105,10 @@ export function generate(opts = {}) {
     tier: out.decl?.dir ? 'universal' : 'adapter',
     link: out.decl,
     pm: detectPackageManager(root),
+    pnpFile: findPnpFile(root),
     isPnP: detectPnP(root),
     rsc: detectRsc(root, cfg.rsc),
-    problems: [...cfgProblems, ...sdkProblems, ...out.problems],
+    problems: [...(opts.optionProblems ?? []), ...cfgProblems, ...sdkProblems, ...out.problems],
     warnings: [],
     changedFiles: [],
     poisoned: false,
@@ -129,6 +131,14 @@ export function generate(opts = {}) {
     state: null,
     genDirRegex: new RegExp(`^${esc(genDir)}[\\\\/]`),
     shimFile: (slot) => path.join(genDir, `${slot}.jsx`),
+    /** The shim a socket specifier ("@acme/core-slots/Button") resolves to; null when it names no slot. */
+    socketShim(spec) {
+      const prefix = `${p.sdk?.slotPackage}/`;
+      const slot = String(spec).startsWith(prefix) ? spec.slice(prefix.length) : null;
+      return slot && Object.hasOwn(p.sdk.slots, slot) ? p.shimFile(slot) : null;
+    },
+    /** Files besides the overrides directory whose change means "regenerate": the config and package.json. */
+    watchFiles: [configFile, path.join(root, 'package.json')].filter(Boolean),
     isProjectSlotFile(id) {
       const f = cleanId(id);
       return isInside(f, genDir) || isInside(f, overridesDir) || isInside(real(f), realOverrides);

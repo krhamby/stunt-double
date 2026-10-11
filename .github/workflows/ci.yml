@@ -36,11 +36,37 @@ jobs:
           pack: 'false'
       - run: npm run test:core
 
-  vite:
-    name: Vite 8 + Vitest 5 suite
+  suite:
+    name: ${{ matrix.suite }} suite
     needs: setup
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout || 30 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # one entry per tests/<suite>.test.mjs; flags install what a suite needs beyond Node and npm
+        include:
+          - suite: vite
+          - suite: vite-pnpm
+            pnpm: true
+          - suite: vite-yarn-pnp
+            yarn: true
+          - suite: esbuild
+          - suite: bun
+            bun: true
+          - suite: webpack
+          - suite: rspack
+          - suite: rsbuild
+          - suite: next
+            timeout: 45
+          - suite: next-webpack
+            timeout: 45
+          - suite: react-router
+          - suite: storybook
+            browser: true
+            timeout: 45
+          - suite: parcel
+            browser: true
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
@@ -50,12 +76,25 @@ jobs:
         with:
           name: packs
           path: .packs/
-      - run: npm run test:vite
+      - if: matrix.bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - if: matrix.pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - if: matrix.yarn
+        run: corepack enable
+      - if: matrix.browser
+        name: Chromium for the render probe (playwright-core, the fixture's version)
+        run: npx -y playwright-core@1.64.0 install --with-deps chromium
+      - run: npm test -- ${{ matrix.suite }}
       - name: upload scenario results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vite-results
+          name: ${{ matrix.suite }}-results
           path: /tmp/stunt-double-tests/*/results.json   # the harness's default work dir (os.tmpdir())
           if-no-files-found: ignore
           retention-days: 7

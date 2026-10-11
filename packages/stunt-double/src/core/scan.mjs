@@ -89,7 +89,7 @@ export function scanOverrides({ root, sdk, cfg, overridesDir, configSource = 'st
     c.ignoresProps = m.ignoresProps ?? [];
   }
   for (const [slot, m] of Object.entries(cfg.map ?? {}))
-    if (sdk.slots[slot] && sdk.isValue?.(slot) && m?.ignoresProps?.length)
+    if (sdk.slots[slot] && sdk.isValue(slot) && m?.ignoresProps?.length)
       problems.push(`[CFG] ${configSource} map."${slot}".ignoresProps: "${slot}" is a value slot (it has a type contract, SlotTypes['${slot}'], not props). Remove ignoresProps.`);
   for (const [slot, list] of claims) {
     if (list.length > 1) {

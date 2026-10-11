@@ -14,11 +14,9 @@
 import path from 'node:path';
 import { generate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
-import { formatReport, formatWarnings, header } from '../core/diagnostics.mjs';
-import { DEFAULTS } from '../core/config.mjs';
+import { formatWarnings } from '../core/diagnostics.mjs';
+import { adapterOptions } from '../core/config.mjs';
 import { esc, posix } from '../core/util.mjs';
-
-const OPTIONS = new Set(['typecheck', 'root', 'configFile', ...Object.keys(DEFAULTS)]);
 
 /**
  * @param {object|Function} [config]  the Jest config, or a (possibly async) function returning it
@@ -27,17 +25,13 @@ const OPTIONS = new Set(['typecheck', 'root', 'configFile', ...Object.keys(DEFAU
 export function withStuntDouble(config = {}, opts = {}) {
   return async function stuntDoubleJestConfig(...args) {
     const base = (typeof config === 'function' ? await config(...args) : config) ?? {};
-    const { typecheck = false, ...genOpts } = opts ?? {};
-    const lines = Object.keys(opts ?? {}).filter((k) => !OPTIONS.has(k))
-      .map((k) => `[CFG] unknown withStuntDouble() option "${k}". Known options: ${[...OPTIONS].join(', ')}.`);
+    const { flags, genOpts } = adapterOptions('withStuntDouble()', opts, { typecheck: false });
     const rootDir = path.resolve(base.rootDir ?? genOpts.root ?? process.cwd());
-    const p = generate({ ...genOpts, root: genOpts.root ?? rootDir, onError: 'return' });
-    lines.push(...p.problems);
-    if (lines.length) throw new StuntDoubleError(formatReport(header(p, lines.length), lines), lines);
+    const p = generate({ ...genOpts, root: genOpts.root ?? rootDir, onError: 'throw' });
     if (p.warnings.length) console.warn(formatWarnings(p));
-    if (typecheck) {
+    if (flags.typecheck) {
       const r = await runTypeGate(p);
-      if (!r.ok) throw new StuntDoubleError(r.message, r.lines ?? []);
+      if (!r.ok) throw new StuntDoubleError(r.message, r.lines);
     }
     const gen = `<rootDir>/${posix(path.relative(rootDir, p.genDir))}`;
     const transformable = p.packages.map(esc).join('|');

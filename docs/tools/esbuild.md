@@ -21,4 +21,4 @@ await esbuild.build({ entryPoints: ['src/main.tsx'], bundle: true, jsx: 'automat
 
 Options: `stuntDoubleEsbuild({ typecheck, audit, ...anyConfigKey })`.
 
-**Verified with** esbuild 0.28.2, TypeScript 7.0.2 and 5.9.3: `tests/esbuild.test.mjs` (the shared catalogue and the universal tier), plus watch mode (a typo fails the rebuild with `[F2]`, the fix recovers).
+**Verified with** esbuild 0.28.2, TypeScript 7.0.2: `tests/esbuild.test.mjs` (the per-tool scenarios of the shared catalogue and the universal tier), plus watch mode (a typo fails the rebuild with `[F2]`, the fix recovers).

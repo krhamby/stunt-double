@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { docsUrl, DOCS_BASE } from '../src/core/index.mjs';
+import { ANCHORS } from '../src/core/diagnostics.mjs';
 import { REPO_ROOT } from './helpers.mjs';
 
 /** GitHub's heading anchor: lowercase, drop punctuation (keeps letters, digits, spaces, - and _), spaces -> -. */
@@ -16,8 +17,7 @@ function anchorsOf(file) {
 }
 
 test('every message code links to an existing heading in docs/', () => {
-  const codes = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'W7', 'F8', 'F9', 'STALE', 'TS-PNP', 'X1', 'X2', 'X3', 'X4',
-    'STUNT-DOUBLE-NOT-WIRED', 'STUNT-DOUBLE-ERROR', 'TS', 'CFG', 'SETUP', 'L1', 'L2', 'DOCTOR', 'SDK1', 'SDK6', 'SDK'];
+  const codes = [...Object.keys(ANCHORS), 'SDK1', 'SDK6', 'SDK'];
   const cache = new Map();
   for (const code of codes) {
     const url = docsUrl(code);

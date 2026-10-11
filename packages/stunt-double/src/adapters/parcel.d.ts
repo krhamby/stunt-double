@@ -2,7 +2,7 @@ import type { GenerateOptions } from '../core/index.js';
 
 /**
  * Options of `stuntDoubleParcel()`. All optional; any stunt-double.config.json key (overridesDir, outDir, map, ...)
- * may be given here and wins over the file.
+ * may be given here and wins over the file. An unknown option is a [CFG] error.
  */
 export interface StuntDoubleParcelOptions extends Omit<GenerateOptions, 'onError' | 'write'> {
   /** Run the contract type gate in production builds. Default true. */

@@ -10,7 +10,7 @@ import { packageManager } from './pm.mjs';
 import { STANDARD_RENDER, STANDARD_BUNDLE, assertFailed, assertPassed, assertMessages, assertRender, assertBundle } from './expect.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, listTree, writeJson } from './util.mjs';
-import { catalogue } from '../mutations/index.mjs';
+import { catalogue, runsInEverySuite } from '../mutations/index.mjs';
 
 const MINUTE = 60_000;
 export const TYPESCRIPT5 = Object.freeze({ alias: 'typescript5', spec: 'npm:typescript@5.9.3' });
@@ -20,6 +20,8 @@ export const TYPESCRIPT5 = Object.freeze({ alias: 'typescript5', spec: 'npm:type
  * @param {string} spec.name             suite name ('vite', 'webpack', ...): test names + work dir
  * @param {string} spec.fixtureDir       the example app, relative to the repo root
  * @param {string} [spec.family]         tool family; enables family-only mutations (e.g. 'vite')
+ * @param {boolean} [spec.reference]     run the WHOLE catalogue (one suite: vite); others run the per-tool
+ *        subset (tests/mutations/index.mjs runsInEverySuite)
  * @param {string} [spec.toolConfig]     the tool's config file (family mutations edit it), e.g. 'vite.config.ts'
  * @param {string} [spec.pm]             package manager (default 'npm')
  * @param {object} spec.commands         shell commands, run in the app with node_modules/.bin on PATH:
@@ -33,7 +35,7 @@ export const TYPESCRIPT5 = Object.freeze({ alias: 'typescript5', spec: 'npm:type
  * @param {object} [spec.unwired]        { files: { rel: text }, command }: a config of this tool WITHOUT the adapter
  * @param {object|Function} [spec.expectations]  per-mutation overrides: { F1a: { command: 'checkThenBuild' },
  *        F5a: { outcome: 'pass', residual: 'why' }, F6c: 'skip reason' } or (mutation, expect) => override
- * @param {(list) => list} [spec.mutations]  filter/extend the applicable catalogue
+ * @param {(list, catalogue) => list} [spec.mutations]  filter/extend the applicable mutations
  * @param {boolean|object} [spec.typescript5]  also run the type-gate mutations with TypeScript 5.9 (npm alias)
  * @param {object} [spec.universal]      universal tier: { files, build, bare, mutations: [ids] } (see README)
  * @param {string[]} [spec.outputs]      build output dirs (or single files, e.g. next-env.d.ts) the build may write
@@ -108,8 +110,8 @@ function normalize(spec) {
   commands.checkThenBuild ??= `${commands.check} && ${commands.build}`;
   if (spec.unwired) commands.unwired ??= spec.unwired.command;
   const has = (need) => (need === 'unwired' ? !!spec.unwired : !!commands[need]);
-  let mutations = catalogue.filter((m) => !m.family || m.family === spec.family);
-  if (spec.mutations) mutations = spec.mutations(mutations);
+  let mutations = catalogue.filter((m) => (!m.family || m.family === spec.family) && (spec.reference || runsInEverySuite(m)));
+  if (spec.mutations) mutations = spec.mutations(mutations, catalogue);
   const ts5 = spec.typescript5 === true ? {} : spec.typescript5 || null;
   return {
     pm: 'npm',

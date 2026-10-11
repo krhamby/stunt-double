@@ -1,6 +1,7 @@
 // Vite 8 + Vitest 5 installed with pnpm (strict, symlinked node_modules) instead of npm: the same fixture
-// (examples/customer-vite) and the whole shared catalogue. The universal tier uses pnpm's "link:" form (a
-// "file:" dependency would be a stale copy, which the wiring self-test rejects). See tests/README.md.
+// (examples/customer-vite) and the per-tool scenarios of the shared catalogue. The universal tier uses pnpm's
+// "link:" form (a "file:" dependency would be a stale copy, which the wiring self-test rejects). See
+// tests/README.md.
 import path from 'node:path';
 import { PACKS_DIR } from './harness/util.mjs';
 import { defineToolSuite } from './harness/index.mjs';
@@ -32,6 +33,8 @@ defineToolSuite({
     test: 'vitest run',
   },
   outputs: ['dist', 'dist-ssr'],
+  // the installed SDK's layout is pnpm's own: also run the dist scan (F6a) and the singleton preflight (F8)
+  mutations: (list, all) => [...list, ...all.filter((m) => m.tags.includes('sdk-bug'))],
   positive: {
     bundle: { files: 'dist/assets/*.js' },
     alsoPass: ['check', 'test'],
@@ -40,12 +43,10 @@ defineToolSuite({
     files: { 'vite.unwired.config.ts': UNWIRED_CONFIG },
     command: 'vite build --config vite.unwired.config.ts',
   },
-  typescript5: true,
   universal: {
     pm: 'pnpm',
     files: { 'vite.universal.config.ts': UNIVERSAL_CONFIG },
     build: `stunt-double check && ${UNIVERSAL_BUILD}`,
     bare: UNIVERSAL_BUILD,
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c'],
   },
 });

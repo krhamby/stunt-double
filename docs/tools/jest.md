@@ -17,4 +17,4 @@ Contracts are not type-checked by default, because babel-jest and @swc/jest neve
 
 **Transformer:** babel-jest (with `@babel/preset-env`, `@babel/preset-typescript` and `@babel/preset-react`) or @swc/jest. Not ts-jest: it has no TypeScript 7 support and forces Node10 resolution.
 
-**Verified with** jest 30.5.2 + babel-jest 30.5.2 + Babel 8 in `examples/customer-webpack`: `tests/webpack.test.mjs` runs `jest` in the positive scenario and requires it to fail on F2, F3, F4, F5, F7 and the value-slot mistakes V2 and V7.
+**Verified with** jest 30.5.2 + babel-jest 30.5.2 + Babel 8 in `examples/customer-webpack`: `tests/webpack.test.mjs` runs `jest` in the positive scenario and requires it to fail at startup on F2 (Jest runs the same generate() as every adapter, so one STA mistake proves the gate is wired).

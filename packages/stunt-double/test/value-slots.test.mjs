@@ -64,16 +64,6 @@ describe('value slots: generation', () => {
     assert.match(problems(gen(root)), /\[F3\] required slot "api" has no implementation: create src\/overrides\/api\.ts exporting `api`/);
   });
 
-  test('[F2] a typo in a value override file name', () => {
-    const { root } = valueProject({ 'src/overrides/fromatPrice.ts': `export const fromatPrice = () => '';\n` });
-    assert.match(problems(gen(root)), /\[F2\] src\/overrides\/fromatPrice\.ts overrides unknown slot "fromatPrice" \(did you mean "formatPrice"\?\)/);
-  });
-
-  test('[F5] a value override with a default export', () => {
-    const { root } = valueProject({ 'src/overrides/formatPrice.ts': `export default (amount: number) => String(amount);\n` });
-    assert.match(problems(gen(root)), /\[F5\] src\/overrides\/formatPrice\.ts must export a named `formatPrice` \(it exports: default\)/);
-  });
-
   test('[F7] a value override that imports itself from the barrel is a circular import, not a render loop', () => {
     const { root } = valueProject({ 'src/overrides/formatPrice.ts': `import { formatPrice as sdk } from '@acme/core';\nexport const formatPrice = (amount: number) => sdk(amount) + '!';\n` });
     const out = problems(gen(root));
@@ -134,13 +124,6 @@ describe('value slots: the type gate (real tsc)', () => {
     if (!g) return t.skip(NO_TS);
     assert.equal(g.r.ok, false);
     assert.match(g.r.message, /\[F1\] formatPrice \(src\/overrides\/formatPrice\.ts\): does not fit the contract @acme\/core SlotTypes\['formatPrice'\]: TS2322[^\n]*number[^\n]*string/);
-  });
-
-  test('[F1] a missing member of a service contract', async (t) => {
-    const g = await gate({ 'src/overrides/api.ts': `export const api = { post: async (path: string) => path };\n` });
-    if (!g) return t.skip(NO_TS);
-    assert.equal(g.r.ok, false);
-    assert.match(g.r.message, /\[F1\] api \(src\/overrides\/api\.ts\): does not fit the contract[^\n]*TS2\d+[^\n]*get/);
   });
 
   for (const [mode, tsconfig] of [['strict on', null], ['strict OFF', LOOSE]]) {

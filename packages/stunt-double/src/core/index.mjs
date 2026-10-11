@@ -6,8 +6,8 @@ export { formatProblems, formatWarnings, formatReport, docsUrl, docsFooter, DOCS
 export { watchProject } from './watch.mjs';
 export { sdkLint, abiOf, contractSlots, contractKeys, schemaFor } from './sdklint.mjs';
 export { rewriteSocketDts, rewriteDtsFile, socketMentions, publishedDtsFiles, contractsDts } from './sdkdts.mjs';
-export { loadConfig, DEFAULTS, CONFIG_FILE, PACKAGE_KEY, detectPackageManager, detectPnP, detectRsc } from './config.mjs';
-export { loadSdk, loadLayers, detectSdk, TOOL_VERSION, MANIFEST_FILE, SLOT_KINDS, COMPONENT_KINDS, kindOf, isValueSlot } from './manifest.mjs';
+export { loadConfig, adapterOptions, DEFAULTS, CONFIG_FILE, PACKAGE_KEY, detectPackageManager, detectPnP, findPnpFile, detectRsc } from './config.mjs';
+export { loadSdk, loadLayers, detectSdk, TOOL_VERSION, MANIFEST_FILE, SLOT_KINDS } from './manifest.mjs';
 export { scanOverrides, unknownSlotMessage } from './scan.mjs';
 export { buildPlan, describeChain } from './plan.mjs';
 export { walkImplementation } from './f7walk.mjs';

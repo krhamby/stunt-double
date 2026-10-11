@@ -21,4 +21,4 @@ Bun's bundler reports a missing export only at runtime, so stunt-double's static
 
 **Not covered by the plugin:** Bun's runtime and dev server. Runtime plugins never see bare specifiers, so a plugin cannot redirect the SDK's slot imports there. Use the universal tier (`npx stunt-double init --universal`, a `"workspace:*"` link with `"workspaces": ["sdk-slots"]`) and run `stunt-double check &&` first.
 
-**Verified with** bun 1.4.2, TypeScript 7.0.2 and 5.9.3: `tests/bun.test.mjs` runs the shared catalogue and the universal tier against `examples/customer-bun` (installed with npm, built with Bun).
+**Verified with** bun 1.4.2, TypeScript 7.0.2: `tests/bun.test.mjs` runs the per-tool scenarios of the shared catalogue and the universal tier against `examples/customer-bun` (installed with npm, built with Bun).

@@ -4,7 +4,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { generate, StuntDoubleError } from '../src/core/index.mjs';
+import { generate, StuntDoubleError, adapterOptions } from '../src/core/index.mjs';
 import { project, write, read, SRC, SLOTS, fakeSdk } from './helpers.mjs';
 
 const base = { 'src/overrides/Button.tsx': SRC.wrapButton, 'src/overrides/Logo.tsx': SRC.logo };
@@ -187,6 +187,13 @@ describe('generate: F6 / F8 and config', () => {
   test('CFG: an unknown config key is an error, like a typo in a file name', () => {
     const { root } = project({ files: base, config: { overidesDir: 'src/overrides' } });
     assert.match(problems(gen(root)), /\[CFG\] unknown key "overidesDir"/);
+  });
+
+  test("CFG: an adapter's unknown option is reported by generate(), its own flags are split off", () => {
+    const { root } = project({ files: base });
+    const { flags, genOpts } = adapterOptions('stuntDouble()', { typecheck: false, overridesDir: 'src/overrides', typecheck2: true }, { typecheck: true, audit: true });
+    assert.deepEqual(flags, { typecheck: false, audit: true });
+    assert.match(problems(gen(root, genOpts)), /\[CFG\] unknown stuntDouble\(\) option "typecheck2"\. Known options: typecheck, audit, root/);
   });
 
   test('SETUP: no dependency ships a slot manifest', () => {

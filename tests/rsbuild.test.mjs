@@ -1,6 +1,6 @@
 // Rsbuild 2 (web + node environments) through the webpack adapter's tools.rspack hook. Fixture:
-// examples/customer-rsbuild, the same overrides as customer-vite. Runs the positive scenario, the shared
-// catalogue, the webpack-family scenarios that apply, the type gate under TypeScript 5.9 and the universal tier.
+// examples/customer-rsbuild, the same overrides as customer-vite. Runs the positive scenario, the per-tool
+// scenarios of the shared catalogue, the webpack-family scenarios that apply and the universal tier.
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './harness/util.mjs';
@@ -32,11 +32,9 @@ defineToolSuite({
   expectations: {
     'F6g-alias-webpack': "the fixture's rsbuild.config.ts has no resolve block to add an alias to (the adapter's precedence over user aliases is covered by the webpack and rspack suites)",
   },
-  typescript5: true,
   universal: {
     files: { 'rsbuild.universal.config.ts': withoutAdapter() },
     build: 'stunt-double check && rsbuild build -c rsbuild.universal.config.ts',
     bare: 'rsbuild build -c rsbuild.universal.config.ts',
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c'],
   },
 });

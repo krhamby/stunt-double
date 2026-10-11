@@ -36,6 +36,16 @@ for (const m of catalogue) {
 
 export const byId = (id) => catalogue.find((m) => m.id === id);
 
+/**
+ * What every suite runs; the reference suite (vite, `reference: true`) runs the whole catalogue. Most mistakes
+ * are caught by generate() or the type gate, the same code whatever the tool, so another suite only needs what
+ * depends on the tool: resolution, its config guards, the audit, regeneration at every start, its family's
+ * scenarios, and one smoke test per stage (STA, TYP, a value slot's contract and its default at runtime).
+ */
+const PER_TOOL_TAGS = ['res', 'cfg', 'aud', 'stale'];
+const SMOKE = ['F1a', 'F2a', 'V1c', 'V-default'];
+export const runsInEverySuite = (m) => !!m.family || SMOKE.includes(m.id) || (m.tags ?? []).some((t) => PER_TOOL_TAGS.includes(t));
+
 /** Mutations that apply to a suite of tool family `family`. */
 export function forFamily(family) {
   return catalogue.filter((m) => !m.family || m.family === family);

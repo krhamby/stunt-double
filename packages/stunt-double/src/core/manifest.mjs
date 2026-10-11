@@ -101,9 +101,6 @@ export function loadSdk(root, cfg) {
     exportOf(slot) {
       return slots[slot]?.export ?? slot;
     },
-    kindOf(slot) {
-      return kindOf(slots[slot]);
-    },
     isValue(slot) {
       return isValueSlot(slots[slot]);
     },

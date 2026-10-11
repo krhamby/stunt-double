@@ -1,6 +1,6 @@
 // esbuild 0.28 (JS API + stuntDoubleEsbuild()). Fixture: examples/customer-esbuild, the same overrides as
-// customer-vite. Runs the positive scenario, the shared mutation catalogue, the type gate under TypeScript 5.9
-// and the universal tier. See tests/README.md.
+// customer-vite. Runs the positive scenario, the per-tool scenarios of the shared catalogue and the universal
+// tier. See tests/README.md.
 import { defineToolSuite } from './harness/index.mjs';
 
 /** The same two builds as scripts/build.mjs, with or without the plugin. */
@@ -29,11 +29,9 @@ defineToolSuite({
     files: { 'scripts/build.unwired.mjs': buildScript(false) },
     command: 'node scripts/build.unwired.mjs',
   },
-  typescript5: true,
   universal: {
     files: { 'scripts/build.universal.mjs': buildScript(false) },
     build: 'stunt-double check && node scripts/build.universal.mjs',
     bare: 'node scripts/build.universal.mjs',
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c'],
   },
 });

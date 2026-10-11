@@ -3,10 +3,10 @@
 stunt-double promises that every injection mistake is a **build failure**: the production build (or CI) exits non-zero with an actionable `[Fx]` message, or the dev server shows it. Never a runtime crash, never a silent fallback to the SDK default. This directory turns that promise into regression tests that run against real tools on real installs:
 
 - **one fixture app per toolchain** (`examples/customer-<tool>/`), installed from the tarballs `npm run setup` packs, exactly like a user's project;
-- **one shared mutation catalogue** (`tests/mutations/`): every mistake of the failure catalogue ([docs/DESIGN.md §2](../docs/DESIGN.md#2-failure-catalogue-the-north-star)) written once, run by every toolchain;
+- **one shared mutation catalogue** (`tests/mutations/`): every mistake of the failure catalogue ([docs/DESIGN.md §2](../docs/DESIGN.md#2-failure-catalogue-the-north-star)) written once. The reference suite (Vite) runs all of it; every other toolchain runs the part that depends on the tool (see [The mutation catalogue](#the-mutation-catalogue));
 - **one small suite file per toolchain** (`tests/<tool>.test.mjs`) that says how to build and render its fixture and, where the tool differs, what it expects instead.
 
-A new toolchain adds three new files and edits nothing (see [Adding a toolchain](#adding-a-toolchain)).
+A new toolchain adds two files and one line of CI (see [Adding a toolchain](#adding-a-toolchain)).
 
 ## Contents
 
@@ -140,18 +140,20 @@ Everything else (the tool's config, extra scripts, a different SSR or render str
 
 Outcomes: `fail` (non-zero exit + every message), `pass` (exit 0, optional render/bundle checks), `safe` (either fails with the messages or passes **and renders the overrides**: for mistakes a tool may make impossible by construction).
 
-Besides the catalogue, `defineToolSuite` adds: the positive test, an optional dev-server test, an optional TypeScript 5.9 run of every `typegate` mutation, and an optional universal-tier block (positive, a subset of the catalogue through `stunt-double check &&`, "link declared but not installed", and the pinned residual "no `check &&` prefix").
+**Which suites run what.** Most mistakes are caught by `generate()` or the type gate: the same code whatever the tool. So only the reference suite (`reference: true`, Vite) runs the whole catalogue, the TypeScript 5.9 rerun and the universal tier's mutations. Every other suite runs what depends on the tool (`runsInEverySuite` in `tests/mutations/index.mjs`): the `res`, `cfg`, `aud` and `stale` scenarios, its family's scenarios, and one smoke test per stage (F1a, F2a, V1c, V-default). A suite can add more with `mutations: (list, catalogue) => ...` (the pnpm suite adds the installed-SDK scenarios, `sdk-bug`).
+
+Besides the catalogue, `defineToolSuite` adds: the positive test, an optional dev-server test, an optional TypeScript 5.9 run of every `typegate` mutation, and an optional universal-tier block (positive, the listed mutations through `stunt-double check &&`, "link declared but not installed", and the pinned residual "no `check &&` prefix").
 
 A scenario that applies to every tool goes in the catalogue (append to the matching file, unique id). A scenario that only makes sense for one tool family goes in a family file with `family: '<name>'` (like `vite-family.mjs`). Adding a catalogue entry is a change every suite inherits, so it needs every existing suite green.
 
 ## Adding a toolchain
 
-Your change is **three new files**. You edit nothing that already exists: not the harness, not the catalogue, not `package.json`, not another workflow.
+Your change is **two new files and one CI line**. You edit nothing else: not the harness, not the catalogue, not `package.json`.
 
 ```
 examples/customer-<tool>/        the fixture app (see the contract above)
 tests/<tool>.test.mjs            one defineToolSuite({...}) call
-.github/workflows/<tool>.yml     its CI job
+.github/workflows/ci.yml         one entry in the `suite` job's matrix
 ```
 
 `scripts/run-tests.mjs` discovers `tests/*.test.mjs` on its own, so `npm test` and `npm test -- <tool>` pick the suite up immediately.
@@ -191,9 +193,8 @@ defineToolSuite({
   },
   expectations: {
     // only where the tool really differs from the catalogue default; every entry is a documented decision
-    F5a: { messages: [/export 'Logo' \(imported as 'Logo'\) was not found/] },  // native message instead
+    F2a: { messages: [/…/] },                       // e.g. the tool's native message instead
   },
-  typescript5: true,                                // also run the type-gate mutations with TypeScript 5.9
 });
 ```
 
@@ -218,44 +219,23 @@ Optional blocks:
     files: { 'webpack.universal.config.mjs': '...' },  // the tool's config WITHOUT the adapter
     build: 'stunt-double check && webpack --config webpack.universal.config.mjs',
     bare: 'webpack --config webpack.universal.config.mjs',
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b'],  // caught by the `check &&` prefix
   },
   pm: 'pnpm',                                       // install the fixture with another package manager
 ```
 
 A dev probe receives the installed fixture (`fx`, reset to pristine), the node:test context and the suite. Use `fx.run()`, `fx.override()`, `fx.pristineText()` and `fx.dir` (a scratch dir next to the app), and `assert` what the developer would see. For Vite-based tools, reuse `viteDevProbe()`.
 
-### 3. The workflow
+### 3. The CI entry
+
+Add one entry to the `suite` job's matrix in `.github/workflows/ci.yml`. It downloads the `.packs/` the `setup` job built once and runs `npm test -- <tool>`:
 
 ```yaml
-# .github/workflows/webpack.yml
-name: webpack
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-concurrency:
-  group: webpack-${{ github.ref }}
-  cancel-in-progress: true
-jobs:
-  webpack:
-    name: webpack 5 suite
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup     # Node 22 + npm cache + npm ci + npm run setup
-      - run: npm test -- webpack
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: webpack-results
-          path: /tmp/stunt-double-tests/*/results.json
-          if-no-files-found: ignore
+          - suite: webpack
+            timeout: 45      # optional, minutes (default 30)
+            browser: true    # optional flags install what the suite needs: bun, pnpm, yarn (corepack), browser (Chromium)
 ```
 
-Install anything else the tool needs (Bun, pnpm via corepack, a browser) in this workflow, not in the shared action.
+A tool that needs something else installed gets a new flag and step in that job, not a step in the shared action.
 
 ### Checklist
 
@@ -285,9 +265,10 @@ Import everything from `tests/harness/index.mjs`.
 | `generatedDir` | | where stunt-double may write (default `.stunt-double`) |
 | `unwired` | | `{ files, command }`: the tool without the adapter |
 | `expectations` | | per-mutation overrides, see above |
-| `mutations` | | `(list) => list` to filter or extend the applicable catalogue |
+| `reference` | | run the whole catalogue (one suite: `vite`); otherwise the per-tool subset |
+| `mutations` | | `(list, catalogue) => list` to filter or extend the applicable mutations |
 | `devProbe` | | `(fx, t, suite) => Promise` |
-| `typescript5` | | `true` or `{ spec, select }`: rerun `typegate` mutations with the npm alias `typescript5` |
+| `typescript5` | | `true` or `{ spec, select }`: rerun `typegate` mutations with the npm alias `typescript5` (the reference suite) |
 | `universal` | | universal-tier block, see above |
 | `addDependencies`, `addDevDependencies` | | extra deps written into the copy before install |
 | `sdk`, `layout` | | another SDK naming or source layout (defaults in `tests/harness/fixture.mjs`) |

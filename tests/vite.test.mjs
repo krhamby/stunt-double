@@ -27,6 +27,7 @@ const ALSO_VITEST = ['F2a', 'F3a', 'F4', 'F5a', 'F7b', 'V2', 'V7'];
 defineToolSuite({
   name: 'vite',
   family: 'vite',
+  reference: true, // the whole catalogue; other suites run the per-tool subset
   fixtureDir: 'examples/customer-vite',
   toolConfig: 'vite.config.ts',
   commands: {

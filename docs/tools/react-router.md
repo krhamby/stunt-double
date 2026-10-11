@@ -15,4 +15,4 @@ export default defineConfig({ plugins: [reactRouter(), stuntDouble()] });
 
 **Install `isbot` yourself.** If it is missing, `react-router build` installs it, which rewrites `package.json` and can prune `node_modules` mid-build.
 
-**Verified with** react-router / @react-router/dev 8.4.0, vite 8.3.4, TypeScript 7.0.2 and 5.9.3: `tests/react-router.test.mjs` runs the shared catalogue, the Vite-family scenarios (SSR externals, a user alias bypassing a slot) and the universal tier, reading the prerendered `build/client/index.html`.
+**Verified with** react-router / @react-router/dev 8.4.0, vite 8.3.4, TypeScript 7.0.2: `tests/react-router.test.mjs` runs the per-tool scenarios of the shared catalogue, the Vite-family scenarios (SSR externals, a user alias bypassing a slot) and the universal tier, reading the prerendered `build/client/index.html`.

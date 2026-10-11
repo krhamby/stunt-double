@@ -13,66 +13,45 @@
 //   onResolve  @acme/core-slots/<Slot> -> <outDir>/gen/<Slot>.jsx
 //   onEnd      AUD: post-bundle graph audit of the metafile (Bun writes esbuild's format) -> throws
 import path from 'node:path';
-import { generate, StuntDoubleError } from '../core/generate.mjs';
+import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, esbuildGraph } from '../core/audit.mjs';
-import { formatProblems, formatReport, formatWarnings, header } from '../core/diagnostics.mjs';
-import { DEFAULTS } from '../core/config.mjs';
+import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
+import { adapterOptions } from '../core/config.mjs';
 import { esc } from '../core/util.mjs';
-
-const PLUGIN = 'stunt-double';
-const PLUGIN_OPTIONS = new Set(['typecheck', 'audit', 'root', 'configFile', ...Object.keys(DEFAULTS)]);
-
-const externalMatches = (pattern, spec) => new RegExp(`^${String(pattern).split('*').map(esc).join('.*')}$`).test(spec);
-
-/** Build options under which the SDK would load natively at runtime, where slot overrides cannot apply. */
-function configGuards(config, p) {
-  const out = [];
-  for (const name of p.packages) {
-    if (config?.packages === 'external')
-      out.push(`[F6] Bun.build option packages: "external" leaves ${name} to the runtime: slot overrides could not apply there. Bundle it: list your other packages in "external" instead.`);
-    const hit = (config?.external ?? []).find((x) => externalMatches(x, name));
-    if (hit) out.push(`[F6] Bun.build option external: "${hit}" leaves ${name} to the runtime: slot overrides could not apply there. Remove it from "external".`);
-  }
-  return out;
-}
+import { externalGuards } from './esbuild.mjs';
 
 /** @param {import('./bun.d.ts').StuntDoubleBunOptions} [opts] */
 export function stuntDoubleBun(opts = {}) {
-  const { typecheck = true, audit = true, ...genOpts } = opts ?? {};
-  const optionProblems = Object.keys(opts ?? {}).filter((k) => !PLUGIN_OPTIONS.has(k))
-    .map((k) => `[CFG] unknown stuntDoubleBun() option "${k}". Known options: ${[...PLUGIN_OPTIONS].join(', ')}.`);
+  const { flags, genOpts } = adapterOptions('stuntDoubleBun()', opts, { typecheck: true, audit: true });
   return {
-    name: PLUGIN,
+    name: 'stunt-double',
     setup(build) {
-      const root = path.resolve(opts?.root ?? process.cwd());
-      const load = () => generate({ ...genOpts, root, onError: 'return' });
-      let p = load();
+      const root = path.resolve(genOpts.root ?? process.cwd());
+      let p = generate({ ...genOpts, root, onError: 'return' });
       let fresh = true;
-      if (audit !== false && build.config) build.config.metafile = true;
+      if (flags.audit && build.config) build.config.metafile = true;
 
       build.onStart(async () => {
-        if (!fresh) p = load();
+        if (!fresh) p = regenerate(p);
         fresh = false;
-        const lines = [...optionProblems, ...p.problems, ...(p.sdk ? configGuards(build.config, p) : [])];
-        if (lines.length) throw new StuntDoubleError(formatReport(header(p, lines.length), lines), lines);
+        const lines = [...p.problems, ...(p.sdk ? externalGuards('Bun.build', build.config, p.packages) : [])];
+        if (lines.length) throw new StuntDoubleError(formatProblems(p, lines), lines);
         if (p.warnings.length) console.warn(formatWarnings(p));
-        if (typecheck !== false) {
+        if (flags.typecheck) {
           const r = await runTypeGate(p);
-          if (!r.ok) throw new StuntDoubleError(r.message, r.lines ?? []);
+          if (!r.ok) throw new StuntDoubleError(r.message, r.lines);
         }
       });
 
       if (!p.sdk) return; // fail closed: onStart throws, and the socket resolves to the registry placeholder
-      const slotPackage = p.sdk.slotPackage;
-      build.onResolve({ filter: new RegExp(`^${esc(slotPackage)}/[A-Za-z0-9_]+$`) }, (a) => {
-        const slot = a.path.slice(slotPackage.length + 1);
-        if (!p.sdk?.slots[slot]) return undefined; // not a slot: the placeholder answers, the dist scan reports it
-        return { path: p.shimFile(slot) };
+      build.onResolve({ filter: new RegExp(`^${esc(p.sdk.slotPackage)}/[A-Za-z0-9_]+$`) }, (a) => {
+        const shim = p.socketShim(a.path);
+        return shim ? { path: shim } : undefined; // not a slot: the placeholder answers, the dist scan reports it
       });
 
       build.onEnd((result) => {
-        if (audit === false || !p?.sdk || !result?.success || !result.metafile) return;
+        if (!flags.audit || !p.sdk || !result?.success || !result.metafile) return;
         const problems = auditGraph(p, esbuildGraph(result.metafile, root));
         if (problems.length) throw new StuntDoubleError(formatProblems(p, problems), problems);
       });

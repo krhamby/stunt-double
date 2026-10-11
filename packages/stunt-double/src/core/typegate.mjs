@@ -45,18 +45,6 @@ export function writeCheckTsconfig(p) {
 const memo = new Map();
 
 /**
- * NODE_OPTIONS of the tsc child. The parent's are dropped (a test runner's or a loader's hooks must not leak into
- * tsc), except Yarn Plug'n'Play's runtime: without it the child cannot even read tsc from Yarn's zip cache.
- */
-function childNodeOptions(root) {
-  for (let d = root; ; d = path.dirname(d)) {
-    const pnp = path.join(d, '.pnp.cjs');
-    if (fs.existsSync(pnp)) return `--require ${JSON.stringify(pnp)}`;
-    if (path.dirname(d) === d) return '';
-  }
-}
-
-/**
  * @returns {Promise<{ ok: boolean, ms?: number, version?: string, message?: string, lines?: string[], output?: string }>}
  */
 export function runTypeGate(p, { force = false } = {}) {
@@ -76,17 +64,20 @@ export function runTypeGate(p, { force = false } = {}) {
   const key = `${p.root}|${p.fingerprint}|${sha(checkText)}|${sha(stamps.join('|'))}|${ts.bin}|${ts.version}`;
   if (!force && memo.has(key)) return memo.get(key);
   const tsconfigFile = writeCheckTsconfig(p);
+  // The parent's NODE_OPTIONS are dropped (a test runner's or a loader's hooks must not leak into tsc), except
+  // Yarn Plug'n'Play's runtime: without it the child cannot even read tsc from Yarn's zip cache.
+  const nodeOptions = p.pnpFile ? `--require ${JSON.stringify(p.pnpFile)}` : '';
   const run = new Promise((done) => {
     const t0 = performance.now();
-    execFile(process.execPath, [ts.bin, '-p', tsconfigFile, '--pretty', 'false'], { cwd: p.root, maxBuffer: 1 << 26, env: { ...process.env, NODE_OPTIONS: childNodeOptions(p.root) } }, (err, stdout, stderr) => {
+    execFile(process.execPath, [ts.bin, '-p', tsconfigFile, '--pretty', 'false'], { cwd: p.root, maxBuffer: 1 << 26, env: { ...process.env, NODE_OPTIONS: nodeOptions } }, (err, stdout, stderr) => {
       const ms = Math.round(performance.now() - t0);
       const output = `${stdout ?? ''}${stderr ?? ''}`;
       if (!err) return done({ ok: true, ms, version: ts.version, output });
       const map = readJson(p.mapFile);
       let lines = mapDiagnostics(p, output, map);
       if (!lines.length) lines = [`[TS] tsc exited with ${err.code ?? err.signal}: ${output.trim().split('\n').slice(0, 5).join(' | ') || err.message}`];
-      const suffix = ` (tsc ${ts.version}, ${ms} ms)`;
-      const message = formatReport(header(p, lines.length), lines.map((l, i) => (i === 0 ? l + suffix : l)));
+      lines[0] += ` (tsc ${ts.version}, ${ms} ms)`;
+      const message = formatReport(header(p, lines.length), lines);
       done({ ok: false, ms, version: ts.version, output, lines, message, tsconfig: posix(path.relative(p.root, tsconfigFile)) });
     });
   });

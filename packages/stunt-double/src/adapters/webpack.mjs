@@ -17,14 +17,13 @@
 //   production    the TYP gate starts with the compilation and is awaited in finishModules -> compilation.errors
 //   finishModules AUD: post-bundle graph audit; [F6] when the SDK became an external module (SSR externals)
 import path from 'node:path';
-import { generate } from '../core/generate.mjs';
+import { generate, regenerate } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, webpackGraph } from '../core/audit.mjs';
-import { formatReport, formatWarnings, header } from '../core/diagnostics.mjs';
-import { DEFAULTS } from '../core/config.mjs';
+import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
+import { adapterOptions } from '../core/config.mjs';
 
 const NAME = 'stunt-double';
-const OPTIONS = new Set(['typecheck', 'audit', 'root', 'configFile', 'mode', ...Object.keys(DEFAULTS)]);
 
 /** The modules webpack / Rspack left to the runtime: their request strings. */
 function externalRequests(modules) {
@@ -39,56 +38,46 @@ function externalRequests(modules) {
   return out;
 }
 
-/** The webpack / Rspack plugin. withStuntDouble() adds it; use it directly when you manage aliases yourself. */
-export class StuntDoublePlugin {
-  /**
-   * @param {object} p      the generated project (from generate())
-   * @param {object} [opts] { typecheck, audit, mode, problems: extra [CFG] lines }
-   */
-  constructor(p, opts = {}) {
+/** The compiler plugin withStuntDouble() adds: regeneration, reports as compilation errors, the gate, the audit. */
+class StuntDoublePlugin {
+  constructor(p, flags) {
     this.p = p;
-    this.opts = opts;
-    this.fresh = true;
+    this.flags = flags;
+    this.fresh = true; // the generation made at config time is fresh for the first run
   }
 
   apply(compiler) {
     const { WebpackError } = compiler.webpack ?? {};
-    const mode = this.opts.mode ?? compiler.options.mode ?? 'production';
-    const genOpts = this.opts.generate ?? {};
-    const regen = (onError) => {
-      // the generation made by withStuntDouble() at config time is fresh for the first run
+    const production = (compiler.options.mode ?? 'production') === 'production';
+    const regen = (onError, changed) => {
       if (this.fresh) { this.fresh = false; return; }
-      this.p = generate({ ...genOpts, root: this.p.root, onError });
+      if (changed && !changed.some((f) => this.p.watches(f))) return; // an app file: nothing to regenerate
+      this.p = regenerate(this.p, { onError });
       // Shim contents changed behind the same paths, and an override may have appeared where a stat said
       // "missing": drop both directories (purge takes path prefixes) from the cached input file system, or a
       // fixed mistake keeps failing on a stale "Can't resolve" until restart.
-      const fsys = compiler.inputFileSystem;
-      if (typeof fsys?.purge === 'function') fsys.purge([this.p.overridesDir, this.p.genDir, ...this.p.changedFiles]);
+      compiler.inputFileSystem?.purge?.([this.p.overridesDir, this.p.genDir, ...this.p.changedFiles]);
     };
     compiler.hooks.beforeRun.tap(NAME, () => regen('return'));
-    compiler.hooks.watchRun.tap(NAME, () => regen('poison'));
+    compiler.hooks.watchRun.tap(NAME, (c) => {
+      const changed = c.modifiedFiles && [...c.modifiedFiles, ...(c.removedFiles ?? [])];
+      regen('poison', changed);
+    });
 
     compiler.hooks.thisCompilation.tap(NAME, (compilation) => {
       const p = this.p;
-      const report = (lines) => {
-        if (!lines.length) return;
-        const text = formatReport(header(p, lines.length), lines);
+      const toError = (text) => {
         const e = WebpackError ? new WebpackError(text) : new Error(text);
         e.stack = ''; // the report is the whole message: no stunt-double / webpack frames
-        compilation.errors.push(e);
+        return e;
       };
-      const problems = [...(this.opts.problems ?? []), ...p.problems];
-      report(problems);
-      if (p.warnings.length) {
-        const w = WebpackError ? new WebpackError(formatWarnings(p)) : new Error(formatWarnings(p));
-        w.stack = '';
-        compilation.warnings.push(w);
-      }
+      if (p.problems.length) compilation.errors.push(toError(formatProblems(p)));
+      if (p.warnings.length) compilation.warnings.push(toError(formatWarnings(p)));
       // watch mode: adding, removing or editing an override (or the config) starts a new compilation
       try { compilation.contextDependencies.add(p.overridesDir); } catch {}
-      for (const f of [p.configFile, path.join(p.root, 'package.json')].filter(Boolean)) try { compilation.fileDependencies.add(f); } catch {}
+      for (const f of p.watchFiles) try { compilation.fileDependencies.add(f); } catch {}
       if (!p.sdk) return;
-      const gate = mode === 'production' && this.opts.typecheck !== false && !problems.length ? runTypeGate(p) : null;
+      const gate = production && this.flags.typecheck && !p.problems.length ? runTypeGate(p) : null;
       compilation.hooks.finishModules.tapPromise(NAME, async (modules) => {
         const list = [...modules];
         const lines = [];
@@ -96,23 +85,22 @@ export class StuntDoublePlugin {
           for (const name of p.packages)
             if (req === name || req.startsWith(`${name}/`))
               lines.push(`[F6] ${name} is an external module in this build ("${req}"): the runtime would load it natively and slot overrides could not apply there (it fails on the registry placeholder). Bundle it: remove it from "externals" (webpack-node-externals: allowlist: [/^${name.replace(/\//g, '\\/')}/]).`);
-        if (this.opts.audit !== false && !problems.length) lines.push(...auditGraph(p, webpackGraph(compilation, list)));
+        if (this.flags.audit && !p.problems.length) lines.push(...auditGraph(p, webpackGraph(compilation, list)));
         const r = gate ? await gate : null;
-        if (r && !r.ok) lines.push(...(r.lines?.length ? r.lines.map((l, i) => (i === 0 ? `${l} (tsc ${r.version}, ${r.ms} ms)` : l)) : [r.message]));
-        report([...new Set(lines)]);
+        if (r && !r.ok) lines.push(...(r.lines.length ? r.lines : [r.message]));
+        const unique = [...new Set(lines)];
+        if (unique.length) compilation.errors.push(toError(formatProblems(p, unique)));
       });
     });
   }
 }
 
-/** Apply stunt-double to one webpack / Rspack configuration object (mutated and returned). */
-function applyTo(config, opts) {
-  const { typecheck = true, audit = true, mode, ...genOpts } = opts;
-  const problems = Object.keys(opts).filter((k) => !OPTIONS.has(k))
-    .map((k) => `[CFG] unknown withStuntDouble() option "${k}". Known options: ${[...OPTIONS].join(', ')}.`);
-  const root = path.resolve(genOpts.root ?? config.context ?? process.cwd());
-  const p = generate({ ...genOpts, root, onError: 'return' });
-  config.plugins = [...(config.plugins ?? []), new StuntDoublePlugin(p, { typecheck, audit, mode, problems, generate: genOpts })];
+/**
+ * Apply a generated project to one webpack / Rspack configuration object (mutated and returned). The Next adapter
+ * calls this with the project it generated at config load.
+ */
+export function applyTo(config, p, flags) {
+  config.plugins = [...(config.plugins ?? []), new StuntDoublePlugin(p, flags)];
   if (!p.sdk) return config; // fail closed: the plugin reports why; the socket resolves to the registry placeholder
   config.resolve ??= {};
   const shims = Object.fromEntries(p.slots.map((s) => [`${p.sdk.slotPackage}/${s}$`, p.shimFile(s)]));
@@ -136,8 +124,14 @@ function applyTo(config, opts) {
  */
 export function withStuntDouble(config = {}, opts = {}) {
   if (typeof config === 'function') return async (...args) => withStuntDouble(await config(...args), opts);
-  if (Array.isArray(config)) return config.map((c) => applyTo(c, opts ?? {}));
-  return applyTo(config, opts ?? {});
+  const { flags, genOpts } = adapterOptions('withStuntDouble()', opts, { typecheck: true, audit: true });
+  const projects = new Map(); // one generation per project root, however many compilers share it
+  const apply = (c) => {
+    const root = path.resolve(genOpts.root ?? c.context ?? process.cwd());
+    if (!projects.has(root)) projects.set(root, generate({ ...genOpts, root, onError: 'return' }));
+    return applyTo(c, projects.get(root), flags);
+  };
+  return Array.isArray(config) ? config.map(apply) : apply(config);
 }
 
 export default withStuntDouble;

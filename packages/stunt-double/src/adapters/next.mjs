@@ -17,17 +17,15 @@ import path from 'node:path';
 import { generate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { watchProject } from '../core/watch.mjs';
-import { formatProblems, formatWarnings, formatReport, header } from '../core/diagnostics.mjs';
-import { DEFAULTS } from '../core/config.mjs';
+import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
+import { adapterOptions } from '../core/config.mjs';
 import { posix } from '../core/util.mjs';
-import { withStuntDouble as withWebpack } from './webpack.mjs';
+import { applyTo } from './webpack.mjs';
 
-const OPTIONS = new Set(['typecheck', 'audit', 'root', 'configFile', ...Object.keys(DEFAULTS)]);
 const PHASE_BUILD = 'phase-production-build';
 const PHASE_DEV = 'phase-development-server';
+const PHASE_SERVER = 'phase-production-server';
 const WATCHING = Symbol.for('stunt-double.next.watching');
-
-const fail = (p, lines) => { throw new StuntDoubleError(formatReport(header(p, lines.length), lines), lines); };
 
 /** Start (once per process) the in-process watcher of `next dev`: regenerate on override / config changes. */
 function watchInDev(p) {
@@ -48,28 +46,29 @@ function watchInDev(p) {
  * @param {import('./next.d.ts').StuntDoubleNextOptions} [opts]
  */
 export function withStuntDouble(nextConfig = {}, opts = {}) {
-  return async function stuntDoubleNextConfig(phase, ctx) {
+  const { flags, genOpts } = adapterOptions('withStuntDouble()', opts, { typecheck: true, audit: true });
+  const byPhase = new Map(); // Next may load the config more than once per phase (Turbopack validates it again)
+
+  async function configFor(phase, ctx) {
     const base = (typeof nextConfig === 'function' ? await nextConfig(phase, ctx) : nextConfig) ?? {};
-    const { typecheck = true, audit = true, ...genOpts } = opts ?? {};
-    const optionProblems = Object.keys(opts ?? {}).filter((k) => !OPTIONS.has(k))
-      .map((k) => `[CFG] unknown withStuntDouble() option "${k}". Known options: ${[...OPTIONS].join(', ')}.`);
+    if (phase === PHASE_SERVER) return base; // `next start` serves the built output: nothing to inject
     const root = path.resolve(genOpts.root ?? process.cwd());
     const dev = phase === PHASE_DEV;
     const p = generate({ ...genOpts, root, onError: dev ? 'poison' : 'return' });
 
-    const lines = [...optionProblems, ...p.problems];
+    const lines = [...p.problems];
     for (const name of p.sdk ? p.packages : [])
       if ((base.serverExternalPackages ?? []).includes(name))
         lines.push(`[F6] serverExternalPackages lists ${name}: the server would load it natively and slot overrides could not apply there. Remove it.`);
     if (phase === PHASE_BUILD) {
-      if (lines.length) fail(p, lines);
+      if (lines.length) throw new StuntDoubleError(formatProblems(p, lines), lines);
       if (p.warnings.length) console.warn(formatWarnings(p));
-      if (typecheck !== false) {
+      if (flags.typecheck) {
         const r = await runTypeGate(p);
-        if (!r.ok) throw new StuntDoubleError(r.message, r.lines ?? []);
+        if (!r.ok) throw new StuntDoubleError(r.message, r.lines);
       }
     } else if (dev) {
-      if (lines.length) console.error(formatReport(header(p, lines.length), lines));
+      if (lines.length) console.error(formatProblems(p, lines));
       if (p.sdk) watchInDev(p);
     }
     if (!p.sdk) return base; // fail closed: the socket resolves to the registry placeholder
@@ -85,9 +84,14 @@ export function withStuntDouble(nextConfig = {}, opts = {}) {
       webpack(config, wctx) {
         const c = userWebpack ? userWebpack(config, wctx) : config;
         // the gate already ran at config load; the webpack side adds aliases, F5-as-error and the audit
-        return withWebpack(c, { ...genOpts, root, typecheck: false, audit });
+        return applyTo(c, p, { typecheck: false, audit: flags.audit });
       },
     };
+  }
+
+  return function stuntDoubleNextConfig(phase, ctx) {
+    if (!byPhase.has(phase)) byPhase.set(phase, configFor(phase, ctx));
+    return byPhase.get(phase);
   };
 }
 

@@ -1,8 +1,8 @@
 // Parcel 2 (the stunt-double/parcel resolver, loaded from a local parcel-resolver-*.mjs file). Fixture:
 // examples/customer-parcel, a browser app with the same overrides as customer-vite; the probe renders dist/ in
-// Chromium (playwright-core). Runs the positive scenario, the shared catalogue, two Parcel-only scenarios, the type
-// gate under TypeScript 5.9 and the universal tier. No SSR target: Parcel 2.16 bundles a second React into the
-// chunk of an SDK's "use client" modules in node targets (docs/limitations.md R5), with or without stunt-double.
+// Chromium (playwright-core). Runs the positive scenario, the per-tool scenarios of the shared catalogue, two
+// Parcel-only scenarios and the universal tier. No SSR target: Parcel 2.16 bundles a second React into the chunk
+// of an SDK's "use client" modules in node targets (docs/limitations.md R5), with or without stunt-double.
 import { defineToolSuite } from './harness/index.mjs';
 
 /** A .parcelrc without the stunt-double resolver (a config nobody wired, or the universal tier). */
@@ -48,11 +48,9 @@ defineToolSuite({
     command: 'parcel build --config ./.parcelrc-unwired --dist-dir dist-unwired',
   },
   mutations: (list) => [...list, ...PARCEL_ONLY],
-  typescript5: true,
   universal: {
     files: { '.parcelrc-universal': PLAIN_PARCELRC },
     build: 'stunt-double check && parcel build --config ./.parcelrc-universal',
     bare: 'parcel build --config ./.parcelrc-universal',
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c'],
   },
 });

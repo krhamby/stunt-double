@@ -1,7 +1,7 @@
 // Storybook 10 with builder-vite (stuntDouble() from stunt-double/vite, picked up from vite.config.ts). Fixture:
 // examples/customer-storybook: one story renders the shared <App/>; `storybook build` writes storybook-static/,
-// and the probe renders the story in Chromium (playwright-core). Runs the positive scenario, the shared catalogue,
-// the Vite-family scenarios that apply, the type gate under TypeScript 5.9 and the universal tier.
+// and the probe renders the story in Chromium (playwright-core). Runs the positive scenario, the per-tool
+// scenarios of the shared catalogue, the Vite-family scenarios that apply and the universal tier.
 import { defineToolSuite } from './harness/index.mjs';
 
 /** A Storybook config dir whose builder-vite uses `viteConfig` instead of vite.config.ts. */
@@ -44,12 +44,10 @@ defineToolSuite({
   expectations: {
     'F6c-ssr': 'a Storybook build has no SSR environment',
   },
-  typescript5: true,
   universal: {
     files: { 'vite.universal.config.ts': PLAIN_VITE, '.storybook-universal/main.ts': storybookDir('vite.universal.config.ts') },
     build: 'stunt-double check && storybook build -c .storybook-universal',
     bare: 'storybook build -c .storybook-universal',
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c'],
   },
   timeout: 8 * 60_000,
 });

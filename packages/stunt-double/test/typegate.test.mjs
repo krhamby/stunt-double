@@ -4,7 +4,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { generate, runTypeGate } from '../src/core/index.mjs';
-import { project, linkTypeScript } from './helpers.mjs';
+import { project, linkTypeScript, write } from './helpers.mjs';
 
 const CONTRACTS = `import type { SlotProps } from '@acme/core/contracts';`;
 const good = {
@@ -50,4 +50,14 @@ describe('type gate (real tsc)', () => {
     assert.match(g.r.message, /\[F9\] Logo \(src\/overrides\/Logo\.tsx\): client slot override must not be an async component/);
     assert.match(g.r.message, /\[F1\] Card \(src\/overrides\/Card\.tsx\): is not a React component/);
   });
+});
+
+test('[TS-PNP] TypeScript 7 under Yarn Plug\'n\'Play is refused up front, before tsc runs', async () => {
+  const { root } = project({ files: good, config: { typescript: 'typescript7' } });
+  write(root, { '.pnp.cjs': '', 'node_modules/typescript7/package.json': { name: 'typescript', version: '7.0.2', bin: { tsc: 'bin/tsc' } } });
+  const p = generate({ root, onError: 'return' });
+  assert.deepEqual(p.problems, []);
+  const r = await runTypeGate(p, { force: true });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /\[TS-PNP\] TypeScript 7\.0\.2 cannot resolve modules under Yarn Plug'n'Play/);
 });

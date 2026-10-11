@@ -1,6 +1,6 @@
 // Bun 1.4's bundler (Bun.build + stuntDoubleBun() from stunt-double/bun). Fixture: examples/customer-bun, the same
 // overrides as customer-vite, installed with npm and built by `bun scripts/build.ts`. Runs the positive scenario,
-// the shared catalogue, the type gate under TypeScript 5.9 and the universal tier. Needs `bun` on PATH.
+// the per-tool scenarios of the shared catalogue and the universal tier. Needs `bun` on PATH.
 import { defineToolSuite } from './harness/index.mjs';
 
 /** The same two builds as scripts/build.ts, without the plugin (a script nobody wired, or the universal tier). */
@@ -33,11 +33,9 @@ defineToolSuite({
     files: { 'scripts/build.unwired.ts': PLAIN_BUILD },
     command: 'bun scripts/build.unwired.ts',
   },
-  typescript5: true,
   universal: {
     files: { 'scripts/build.universal.ts': PLAIN_BUILD },
     build: 'stunt-double check && bun scripts/build.universal.ts',
     bare: 'bun scripts/build.universal.ts',
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c'],
   },
 });

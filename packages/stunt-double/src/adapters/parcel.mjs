@@ -14,12 +14,12 @@
 //               silently ignored)
 // The SDK must be resolvable through its "exports" map: set "@parcel/resolver-default": { "packageExports": true }
 // in package.json (an [F6] guard says so).
-import fs from 'node:fs';
 import path from 'node:path';
 import { generate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
-import { formatReport, header } from '../core/diagnostics.mjs';
-import { readJson } from '../core/util.mjs';
+import { formatProblems } from '../core/diagnostics.mjs';
+import { adapterOptions } from '../core/config.mjs';
+import { readJson, posix } from '../core/util.mjs';
 
 // @parcel/plugin's Resolver class only stores its options under this symbol; building the object directly keeps
 // stunt-double free of a dependency on @parcel/plugin (which a strict package manager would not let it reach).
@@ -52,7 +52,7 @@ function fail(message, lines) {
 
 /** @param {import('./parcel.d.ts').StuntDoubleParcelOptions} [opts] */
 export function stuntDoubleParcel(opts = {}) {
-  const { typecheck = true, ...genOpts } = opts ?? {};
+  const { flags, genOpts } = adapterOptions('stuntDoubleParcel()', opts, { typecheck: true });
   return {
     [PARCEL_PLUGIN_CONFIG]: {
       async loadConfig({ config, options }) {
@@ -62,15 +62,13 @@ export function stuntDoubleParcel(opts = {}) {
         const production = options.mode === 'production';
         const p = generate({ ...genOpts, root, onError: production ? 'return' : 'poison' });
         // re-run on: an override (or a file it imports), the config, package.json, a new file in the overrides dir
-        for (const f of new Set([...p.implFiles, ...p.closureFiles, path.join(root, 'package.json'), p.configFile].filter(Boolean)))
-          config.invalidateOnFileChange(f);
-        config.invalidateOnFileCreate({ glob: `${p.overridesDir.split(path.sep).join('/')}/**/*` });
-        if (fs.existsSync(path.join(root, 'stunt-double.config.json'))) config.invalidateOnFileChange(path.join(root, 'stunt-double.config.json'));
+        for (const f of new Set([...p.implFiles, ...p.closureFiles, ...p.watchFiles])) config.invalidateOnFileChange(f);
+        config.invalidateOnFileCreate({ glob: `${posix(p.overridesDir)}/**/*` });
         const lines = [...p.problems, ...(p.sdk ? configGuards(root, p) : [])];
-        if (lines.length) fail(formatReport(header(p, lines.length), lines), lines);
-        if (production && typecheck !== false) {
+        if (lines.length) fail(formatProblems(p, lines), lines);
+        if (production && flags.typecheck) {
           const r = await runTypeGate(p);
-          if (!r.ok) fail(r.message, r.lines ?? []);
+          if (!r.ok) fail(r.message, r.lines);
         }
         return { slotPackage: p.sdk.slotPackage, shims: Object.fromEntries(p.slots.map((s) => [s, p.shimFile(s)])) };
       },

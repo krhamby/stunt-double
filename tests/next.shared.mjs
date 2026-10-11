@@ -14,13 +14,15 @@ export default { transpilePackages: ['@acme/core'] };
  * @param {object} o
  * @param {string} o.name     suite name
  * @param {string} o.build    the `next build` command line (without env)
+ * @param {Function} [o.mutations]  filter the applicable mutations
  */
-export function nextSuite({ name, build }) {
+export function nextSuite({ name, build, mutations }) {
   defineToolSuite({
     name,
     family: 'next',
     fixtureDir: 'examples/customer-next',
     toolConfig: 'next.config.mjs',
+    mutations,
     commands: {
       build: `${ENV} ${build}`,
       render: 'node probes/render.mjs',
@@ -35,12 +37,10 @@ export function nextSuite({ name, build }) {
       files: { 'next.config.mjs': PLAIN_CONFIG },
       command: `${ENV} ${build}`,
     },
-    typescript5: true,
     universal: {
       files: { 'next.config.mjs': PLAIN_CONFIG },
       build: `stunt-double check && ${ENV} ${build}`,
       bare: `${ENV} ${build}`,
-      mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c'],
     },
     timeout: 8 * 60_000,
   });

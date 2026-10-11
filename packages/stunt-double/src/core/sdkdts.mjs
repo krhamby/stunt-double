@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseSync } from 'oxc-parser';
 import { listFiles, posix, relSpec, globToRegExp, fileExists } from './util.mjs';
+import { isValueSlot } from './manifest.mjs';
 
 const DTS = /\.d\.[cm]?ts$/;
 
@@ -96,7 +97,7 @@ export function rewriteDtsFile({ file, pkgDir, manifest, contracts }) {
     if (!contracts) { errors.push(`[SDK6] ${rel}: required slot "${s}" needs the published contracts (exports "./contracts" types) to declare its type.`); return 'never'; }
     const spec = relSpec(dir, contracts).replace(/\.d\.([cm]?)ts$/, '.$1js');
     // a value slot is typed by its whole contract; a component slot is a component of its props
-    return manifest.slots[s]?.kind === 'value'
+    return isValueSlot(manifest.slots[s])
       ? `import("${spec}").SlotTypes[${JSON.stringify(s)}]`
       : `import("react").ComponentType<import("${spec}").SlotProps[${JSON.stringify(s)}]>`;
   };
@@ -140,7 +141,7 @@ export function rewriteDtsFile({ file, pkgDir, manifest, contracts }) {
     if (!manifest.slots[s]) return void unknown(s);
     const orig = original(s);
     if (orig) edits.push([lit.start, lit.end, `${src[lit.start]}${orig}${src[lit.start]}`]);
-    else if (!manifest.slots[s].default) errors.push(`[SDK6] ${rel}: ${src.slice(n.start, n.end)} refers to required slot "${s}" by inference: give that declaration an explicit type (e.g. ${manifest.slots[s].kind === 'value' ? 'SlotTypes' : 'SlotProps'}["${s}"]).`);
+    else if (!manifest.slots[s].default) errors.push(`[SDK6] ${rel}: ${src.slice(n.start, n.end)} refers to required slot "${s}" by inference: give that declaration an explicit type (e.g. ${isValueSlot(manifest.slots[s]) ? 'SlotTypes' : 'SlotProps'}["${s}"]).`);
   });
   edits.sort((a, b) => b[0] - a[0]);
   let text = src;

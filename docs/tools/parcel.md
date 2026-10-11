@@ -23,4 +23,4 @@ Parcel's reporter word-wraps diagnostics at the terminal width, so the resolver 
 
 **Node targets.** Parcel bundles `node_modules` for browser targets but not for node targets by default, so an SSR target must bundle the SDK: `"includeNodeModules": { "react": false, "react-dom": false }` (unlisted packages are bundled). Even then, Parcel 2.16 puts an SDK's `"use client"` modules into a separate chunk with its own copy of React in node targets, which crashes at render time (residual R5). That comes from the SDK's own directives, with or without stunt-double. Browser targets are unaffected.
 
-**Verified with** parcel 2.16.4, TypeScript 7.0.2 and 5.9.3: `tests/parcel.test.mjs` runs the shared catalogue, two Parcel-only scenarios (a node target that leaves the SDK to the runtime, package exports off) and the universal tier, rendering the built browser app in Chromium.
+**Verified with** parcel 2.16.4, TypeScript 7.0.2: `tests/parcel.test.mjs` runs the per-tool scenarios of the shared catalogue, two Parcel-only scenarios (a node target that leaves the SDK to the runtime, package exports off) and the universal tier, rendering the built browser app in Chromium.

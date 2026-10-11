@@ -6,7 +6,7 @@ import { plural, posix } from './util.mjs';
 export const DOCS_BASE = 'https://github.com/krhamby/stunt-double/blob/main/docs/';
 
 /** Message code -> section of docs/errors.md (GitHub heading anchors). */
-const ANCHORS = {
+export const ANCHORS = {
   F1: 'f1--contract-mismatch',
   F2: 'f2--unknown-slot',
   F3: 'f3--missing-implementation',

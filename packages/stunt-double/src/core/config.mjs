@@ -98,6 +98,25 @@ export function loadConfig(root, overrides = {}) {
   return { cfg, configFile: file, configSource: source, problems };
 }
 
+/**
+ * Split an adapter's options into its own flags (`flagDefaults`: { typecheck: true, ... }) and generate()
+ * options. Any other key is a [CFG] problem, carried in `genOpts.optionProblems` so generate() reports it with
+ * its own (and every regeneration keeps reporting it).
+ */
+export function adapterOptions(name, opts, flagDefaults) {
+  const flags = { ...flagDefaults };
+  const genOpts = {};
+  const problems = [];
+  const base = ['root', 'configFile', ...Object.keys(DEFAULTS)];
+  for (const [k, v] of Object.entries(opts ?? {})) {
+    if (k in flagDefaults) { if (v !== undefined) flags[k] = v; }
+    else if (base.includes(k)) genOpts[k] = v;
+    else problems.push(`[CFG] unknown ${name} option "${k}". Known options: ${[...Object.keys(flagDefaults), ...base].join(', ')}.`);
+  }
+  if (problems.length) genOpts.optionProblems = problems;
+  return { flags, genOpts };
+}
+
 /** Package manager in use (for messages and `init`). */
 export function detectPackageManager(root) {
   const pkg = readJson(path.join(root, 'package.json')) ?? {};
@@ -114,12 +133,17 @@ export function detectPackageManager(root) {
   return ['pnpm', 'yarn', 'bun'].find((x) => ua.startsWith(x)) ?? 'npm';
 }
 
-export function detectPnP(root) {
-  if (process.versions.pnp) return true;
+/** The Yarn Plug'n'Play runtime (.pnp.cjs) of the project at `root`, or null. */
+export function findPnpFile(root) {
   for (let d = root; ; d = path.dirname(d)) {
-    if (fs.existsSync(path.join(d, '.pnp.cjs'))) return true;
-    if (path.dirname(d) === d) return false;
+    const f = path.join(d, '.pnp.cjs');
+    if (fs.existsSync(f)) return f;
+    if (path.dirname(d) === d) return null;
   }
+}
+
+export function detectPnP(root) {
+  return !!process.versions.pnp || !!findPnpFile(root);
 }
 
 const RSC_PACKAGES = ['next', 'waku', '@vitejs/plugin-rsc'];

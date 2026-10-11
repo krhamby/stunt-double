@@ -10,7 +10,7 @@ import { parseModule } from './parse.mjs';
 import { DEFAULTS } from './config.mjs';
 import { rewriteSocketDts, publishedDtsFiles, socketMentions } from './sdkdts.mjs';
 import { readJson, real, sha, posix, fileExists } from './util.mjs';
-import { SLOT_KINDS, kindOf } from './manifest.mjs';
+import { SLOT_KINDS, kindOf, isValueSlot } from './manifest.mjs';
 
 function findPackageDir(start) {
   for (let d = path.resolve(start); ; d = path.dirname(d)) {
@@ -144,8 +144,8 @@ export function sdkLint(start = process.cwd(), { write = false, fix = false } = 
   // rule 2b + 3: contracts
   const contracts = ['dist/contracts.d.ts', 'contracts.d.ts'].map((f) => path.join(pkgDir, f)).find(fileExists);
   let contractsText = '';
-  const valueSlots = slotNames.filter((s) => kindOf(slots[s]) === 'value');
-  const componentSlots = slotNames.filter((s) => kindOf(slots[s]) !== 'value');
+  const valueSlots = slotNames.filter((s) => isValueSlot(slots[s]));
+  const componentSlots = slotNames.filter((s) => !isValueSlot(slots[s]));
   if (!contracts) errors.push(`[SDK2] no contracts.d.ts (dist/contracts.d.ts) with "export interface SlotProps"${valueSlots.length ? ' and "export interface SlotTypes"' : ''}`);
   else {
     contractsText = fs.readFileSync(contracts, 'utf8');
@@ -163,7 +163,7 @@ export function sdkLint(start = process.cwd(), { write = false, fix = false } = 
       for (const s of own) if (!keys.includes(s)) errors.push(`[SDK2] ${what} slot "${s}" has no ${iface} entry in ${rel(contracts)}`);
       for (const k of keys) {
         if (!slots[k]) errors.push(`[SDK2] ${iface}["${k}"] in ${rel(contracts)} is not a slot in slot-manifest.json`);
-        else if (!own.includes(k)) errors.push(`[SDK2] ${iface}["${k}"] in ${rel(contracts)}: "${k}" is a ${kindOf(slots[k]) === 'value' ? 'value' : 'component'} slot, so its contract belongs in ${other}`);
+        else if (!own.includes(k)) errors.push(`[SDK2] ${iface}["${k}"] in ${rel(contracts)}: "${k}" is a ${isValueSlot(slots[k]) ? 'value' : 'component'} slot, so its contract belongs in ${other}`);
       }
     }
     for (const e of parseModule(contracts).edges)
