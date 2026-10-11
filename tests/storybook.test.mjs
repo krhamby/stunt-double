@@ -1,8 +1,8 @@
 // Storybook 10.6 (builder-vite and builder-webpack5) x stunt-double.
 //
 //   npm run setup
-//   (cd examples/customer-storybook-vite && npm install --no-package-lock)
-//   (cd examples/customer-storybook-webpack && npm install --no-package-lock)
+//   (cd examples/customer-storybook-vite && npm install)       # .npmrc: package-lock=false
+//   (cd examples/customer-storybook-webpack && npm install)
 //   node --test tests/storybook.test.mjs
 //
 // Positive: every wired Storybook config builds, and its stories render the project's overrides in the app
@@ -42,12 +42,12 @@ const EXPECT_RENDER = {
 };
 
 // ---- helpers ----------------------------------------------------------------------------------------------
-/** Generated output of an example (shims, check file), taken from the core project object: never copied. */
+/** Generated output of an example (the outDir), taken from the core project object: never copied. */
 async function generatedPaths(example) {
   const root = EXAMPLES[example];
   const { generate } = await import(pathToFileURL(path.join(root, 'node_modules', 'stunt-double', 'src', 'core', 'index.mjs')).href);
   const p = generate({ root, write: false, onError: 'return' });
-  return [p.genDir, p.checkFile].map((f) => path.relative(root, f));
+  return [path.relative(root, p.outDir)];
 }
 const GENERATED = {};
 
@@ -69,14 +69,12 @@ function project(name, example) {
 function projectWithSdk(name, example, tarball) {
   const dir = copyProject(name, example);
   const pj = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-  for (const [k, v] of Object.entries({ ...pj.dependencies, ...pj.devDependencies }))
-    if (typeof v === 'string' && v.startsWith('file:../../')) {
-      const field = pj.dependencies[k] ? 'dependencies' : 'devDependencies';
-      pj[field][k] = `file:${path.join(repo, v.slice('file:../../'.length))}`;
-    }
+  for (const field of ['dependencies', 'devDependencies', 'overrides'])
+    for (const [k, v] of Object.entries(pj[field] ?? {}))
+      if (typeof v === 'string' && v.startsWith('file:../../')) pj[field][k] = `file:${path.join(repo, v.slice('file:../../'.length))}`;
   pj.dependencies['@acme/core'] = `file:${path.join(packs, tarball)}`;
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pj, null, 2));
-  const r = spawnSync('npm', ['install', '--no-package-lock', '--no-audit', '--no-fund', '--prefer-offline'], { cwd: dir, encoding: 'utf8', env: { ...process.env, npm_config_loglevel: 'error' } });
+  const r = spawnSync('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline'], { cwd: dir, encoding: 'utf8', env: { ...process.env, npm_config_loglevel: 'error' } });
   assert.equal(r.status, 0, `npm install for ${tarball} failed:\n${r.stdout}\n${r.stderr}`);
   return dir;
 }
@@ -113,7 +111,7 @@ function assertFails(res, codes, label) {
 
 before(async () => {
   for (const [key, example] of Object.entries(EXAMPLES)) {
-    assert.ok(fs.existsSync(path.join(example, 'node_modules', 'storybook')), `${path.relative(repo, example)} is not installed: npm run setup && (cd ${path.relative(repo, example)} && npm install --no-package-lock)`);
+    assert.ok(fs.existsSync(path.join(example, 'node_modules', 'storybook')), `${path.relative(repo, example)} is not installed: npm run setup && (cd ${path.relative(repo, example)} && npm install)`);
     GENERATED[key] = await generatedPaths(key);
   }
 });
