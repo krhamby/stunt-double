@@ -34,10 +34,22 @@ export function withStuntDouble(nextConfig = {}, opts = {}) {
   return /** @type {any} */ (wrap(nextConfig, opts));
 }
 
+// Next prints a config-load error's enumerable props after its message: keep `problems` (already in the
+// message) out of that dump.
+function fail(e) {
+  if (e && Array.isArray(e.problems)) Object.defineProperty(e, 'problems', { value: e.problems, enumerable: false });
+  throw e;
+}
+
 function wrap(nextConfig = {}, opts = {}) {
+  try { return wrapUnsafe(nextConfig, opts); } catch (e) { fail(e); }
+}
+
+function wrapUnsafe(nextConfig, opts) {
   const { audit = true, ...genOpts } = opts;
+  const refuse = (m) => { throw new StuntDoubleError(m, [m]); };
   if (nextConfig.typescript?.ignoreBuildErrors)
-    throw new StuntDoubleError(`[X1] typescript.ignoreBuildErrors would skip the slot contract check (src/stunt-double.check.ts). Remove it.`, ['[X1]']);
+    refuse('[X1] typescript.ignoreBuildErrors would skip the slot contract check (src/stunt-double.check.ts). Remove it.');
 
   const root = path.resolve(genOpts.root ?? process.cwd());
   const tsconfigPath = nextConfig.typescript?.tsconfigPath;
@@ -47,7 +59,7 @@ function wrap(nextConfig = {}, opts = {}) {
   // X2: next build is the type gate, and it checks exactly the tsconfig program. Not covered = silently unchecked.
   if (!p.tsconfigCoversCheckFile) {
     const where = p.tsconfigRel ?? 'tsconfig.json (not found)';
-    throw new StuntDoubleError(`[X2] ${where} does not include ${p.rel(p.checkFile)}: next build would not type-check slot contracts. Add it to "files" in ${where}.`, ['[X2]']);
+    refuse(`[X2] ${where} does not include ${p.rel(p.checkFile)}: next build would not type-check slot contracts. Add it to "files" in ${where}.`);
   }
   const otherWarnings = p.warnings.filter((w) => !w.startsWith('[X2]'));
   if (otherWarnings.length && !process.env.__STUNT_DOUBLE_NEXT_WARNED) {
