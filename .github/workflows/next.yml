@@ -1,0 +1,32 @@
+name: next
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: next-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  next:
+    name: Next.js 16 (Turbopack + webpack, dev, Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run setup
+      - name: Playwright + Chromium (browser checks)
+        run: |
+          npm install -g playwright@1.56.1
+          npx -y playwright@1.56.1 install --with-deps chromium
+      - run: node --test --test-reporter=spec tests/next.test.mjs
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'

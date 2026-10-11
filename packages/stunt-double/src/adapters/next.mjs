@@ -6,17 +6,19 @@
 //
 // What it does (spec §7.4):
 //   config load   STA (generate, onError 'throw'): any injection mistake fails `next build` AND `next dev` startup
-//                 CFG: refuses typescript.ignoreBuildErrors [X1] and a tsconfig that does not include the check
-//                 file [X2]: `next build` type-checks src/stunt-double.check.ts natively, it is the TYP gate here
+//   TYP           compiler.runAfterProductionCompile (next build only, both bundlers, awaited; a throw fails the
+//                 build): the stunt-double type gate on the generated check file, independent of the app tsconfig
+//                 and of typescript.ignoreBuildErrors. The user's own runAfterProductionCompile runs first.
 //   transpilePackages   the SDK (+ layers): the Pages Router / route handlers would otherwise externalize it and
 //                 Node would load @acme/core natively (the placeholder poison, or a .jsx shim Node refuses)
 //   Turbopack     ONE wildcard resolveAlias '@acme/core-slots/*' -> './sdk-slots/gen/*.jsx'. The target MUST be
 //                 relative ('./'): Turbopack silently ignores absolute or missing targets and falls back
 //   webpack       exact-match aliases to the shims, exportsPresence 'error' (F5), the fingerprint folded into the
 //                 persistent cache version, and a plugin reporting STA problems + the post-bundle audit (AUD)
-//                 through compilation.errors. No type gate here: next build runs tsc on the check file itself.
+//                 through compilation.errors (the type gate runs in runAfterProductionCompile for both bundlers).
 import path from 'node:path';
 import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
+import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, webpackGraph } from '../core/audit.mjs';
 import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
 
@@ -58,21 +60,13 @@ function wrap(nextConfig = {}, opts = {}) {
 }
 
 function wrapUnsafe(nextConfig, opts) {
-  const { audit = true, ...genOpts } = opts;
-  const refuse = (m) => { throw new StuntDoubleError(m, [m]); };
-  if (nextConfig.typescript?.ignoreBuildErrors)
-    refuse('[X1] typescript.ignoreBuildErrors would skip the slot contract check (src/stunt-double.check.ts). Remove it.');
-
+  const { audit = true, typecheck = true, ...genOpts } = opts;
   const root = path.resolve(genOpts.root ?? process.cwd());
   const tsconfigPath = nextConfig.typescript?.tsconfigPath;
   const p = generate({ ...(tsconfigPath && !genOpts.tsconfig ? { tsconfig: tsconfigPath } : {}), ...genOpts, root, onError: 'throw' });
   if (!p.sdk) throw new StuntDoubleError(formatProblems(p), p.problems); // unreachable with onError 'throw'; belt and braces
 
-  // X2: next build is the type gate, and it checks exactly the tsconfig program. Not covered = silently unchecked.
-  if (!p.tsconfigCoversCheckFile) {
-    const where = p.tsconfigRel ?? 'tsconfig.json (not found)';
-    refuse(`[X2] ${where} does not include ${p.rel(p.checkFile)}: next build would not type-check slot contracts. Add it to "files" in ${where}.`);
-  }
+  // [X2] (the app tsconfig does not include the check file) is not a gap here: the adapter runs its own gate.
   const otherWarnings = p.warnings.filter((w) => !w.startsWith('[X2]'));
   if (otherWarnings.length && !process.env.__STUNT_DOUBLE_NEXT_WARNED) {
     process.env.__STUNT_DOUBLE_NEXT_WARNED = '1';
@@ -83,6 +77,7 @@ function wrapUnsafe(nextConfig, opts) {
   // Turbopack: './'-relative target, posix separators (an absolute target is silently ignored).
   const rel = './' + path.relative(p.root, p.genDir).split(path.sep).join('/');
   const userWebpack = nextConfig.webpack;
+  const userAfterCompile = nextConfig.compiler?.runAfterProductionCompile;
 
   return {
     ...nextConfig,
@@ -90,6 +85,16 @@ function wrapUnsafe(nextConfig, opts) {
     turbopack: {
       ...nextConfig.turbopack,
       resolveAlias: { ...nextConfig.turbopack?.resolveAlias, [`${slotPkg}/*`]: `${rel}/*.jsx` },
+    },
+    compiler: {
+      ...nextConfig.compiler,
+      // TYP: `next build` only (never dev or start), Turbopack and webpack alike, in the main build process.
+      async runAfterProductionCompile(meta) {
+        if (userAfterCompile) await userAfterCompile(meta);
+        if (typecheck === false) return;
+        const r = await runTypeGate(p);
+        if (!r.ok) fail(new StuntDoubleError(r.message, r.lines ?? [r.message]));
+      },
     },
     webpack(config, ctx) {
       const c = userWebpack ? userWebpack(config, ctx) : config;

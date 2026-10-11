@@ -2,6 +2,8 @@
 import type { GenerateOptions } from '../core/index.d.ts';
 
 export interface StuntDoubleNextOptions extends Omit<GenerateOptions, 'onError' | 'write'> {
+  /** `next build`: run the slot contract type gate (src/stunt-double.check.ts) after compiling. Default true. */
+  typecheck?: boolean;
   /** `next build --webpack`: post-bundle module-graph audit (F6/F8) through compilation.errors. Default true. */
   audit?: boolean;
 }
