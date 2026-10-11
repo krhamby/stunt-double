@@ -1,0 +1,27 @@
+{
+  "name": "customer-metro",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A project that injects its own components into @acme/core with stunt-double (Metro 0.87, the React Native bundler).",
+  "scripts": {
+    "postinstall": "stunt-double gen --no-fail",
+    "build": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && metro build index.js --platform ios --out dist/main.js --dev false --minify false",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "stunt-double check",
+    "probe": "node probes/render.mjs"
+  },
+  "dependencies": {
+    "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
+    "@acme/core-slots": "file:./sdk-slots",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@react-native/metro-config": "0.87.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "metro": "0.87.1",
+    "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
+    "typescript": "7.0.2"
+  }
+}

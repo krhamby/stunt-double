@@ -15,6 +15,7 @@
     "setup": "node scripts/setup.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:core": "node --test \"packages/stunt-double/test/**/*.test.mjs\"",
-    "test:vite": "node --test tests/vite.test.mjs"
+    "test:vite": "node --test tests/vite.test.mjs",
+    "test:metro": "node --test tests/metro.test.mjs"
   }
 }
