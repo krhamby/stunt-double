@@ -129,6 +129,16 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
 
   test('stunt-double check: exit 0', () => passes(cmd.check(base)));
 
+  // regression (src/cli.mjs ADAPTERLESS): `bun build.ts` runs a Bun.build() script and is not the `bun build` CLI
+  test('stunt-double doctor: passes on "bun build.ts"; still flags a bare `bun build` script', () => {
+    const dir = project('doctor');
+    passes(run(process.execPath, [sdCli(dir), 'doctor'], dir));
+    const pkg = readJson(path.join(dir, 'package.json'));
+    pkg.scripts['build:cli'] = 'bun build ./src/main.tsx --outdir dist';
+    writeJson(path.join(dir, 'package.json'), pkg);
+    fails(run(process.execPath, [sdCli(dir), 'doctor'], dir), /\[DOCTOR\] script "build:cli" runs an adapter-less bundler without the gate/);
+  });
+
   test('bun test (no plugin: the link) renders the overrides', () => {
     const r = cmd.test(project('positive-test'));
     passes(r);
