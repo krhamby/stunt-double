@@ -67,7 +67,10 @@ The code uses plain names throughout:
 | Swinject (runtime) | stunt-double (build time) |
 |---|---|
 | `container.register(Button.self) {…}` | the file `src/overrides/Button.tsx` |
-| the protocol a registration must conform to | the contract `SlotProps['Button']` from `@acme/core/contracts` |
+| `container.register(Analytics.self) {…}`: any type, not only views | the file `src/overrides/analytics.ts`, a **value slot** (§6.6) |
+| the protocol a registration must conform to | the contract `SlotProps['Button']` (a component) or `SlotTypes['analytics']` (a value) from `@acme/core/contracts` |
+| container scope (one shared instance) | the default: an ES module is evaluated once per bundle |
+| transient scope, or registration with runtime arguments | a value slot whose value is a factory: `createClient(options)` |
 | `resolve()` | a static `import`: the SDK imports `@acme/core-slots/Button` |
 | the container's registration table | one generated shim per slot in `sdk-slots/gen/`, reached through one static alias or a package link |
 | parent-container fallback | the effective order: app override, then optional brand layers, then the SDK default (§5.5) |
@@ -245,6 +248,8 @@ Every line starts with a stable code, names the file and slot, and says what to 
 stunt-double: 2 injection errors (@acme/core@1.0.0)
   [F1] Button (src/overrides/Button.tsx): TS2322 Type 'ButtonProps' is not assignable to type 'ButtonProps & { tone: "loud"; }'. Property 'tone' is missing ... (tsc 7.0.2, 162 ms)
   [F1] Button (src/overrides/Button.tsx): override ignores these SDK props: "onClick" | "variant" (declare them, or list them in stunt-double.config.json map.Button.ignoresProps)
+  [F1] analytics (src/overrides/analytics.ts): does not fit the contract @acme/core SlotTypes['analytics']: TS2741 Property 'id' is missing ...
+  [F1] analytics (src/overrides/analytics.ts): narrows the parameters of these members: "track" (the SDK may pass any value its contract allows: accept the contract's parameter types)
   [F2] src/overrides/Buton.tsx overrides unknown slot "Buton" (did you mean "Button"?). @acme/core@1.0.0 slots: Button, Card, Logo. Helpers belong in _-prefixed files or inside src/overrides/<Slot>/.
   [F2] src/overrides/Button.tsx: slot "Button" was RENAMED to "ActionButton" in @acme/core@2.0.0: rename the file to ActionButton.tsx and export `ActionButton`.
   [F2] src/overrides/Tooltip.tsx: slot "Tooltip" was REMOVED in @acme/core@2.0.0: use the Popover slot.
@@ -258,6 +263,7 @@ stunt-double: 2 injection errors (@acme/core@1.0.0)
   [F6] src/pages/Legacy.tsx imports "@acme/core/original/Button" outside src/overrides: that call site renders the SDK default and bypasses the "Button" slot. Import from "@acme/core".
   [F6] @acme/core imports @acme/core-slots/Button but sdk-slots/gen/Button.jsx is not in the bundle: an alias or plugin resolved the socket elsewhere.
   [F7] src/overrides/Button.tsx -> src/components/Fancy.tsx uses <ns>.Button from "@acme/core": that is slot "Button" itself (infinite render). Wrap the default via '@acme/core/original/Button'.
+  [F7] src/overrides/formatPrice.ts imports { formatPrice } from "@acme/core": that is slot "formatPrice" itself (a circular import: the implementation would read itself before it is initialized). Use the default via '@acme/core/original/formatPrice'.
   [W7] src/overrides/Button.tsx renders Dialog from @acme/core, and Dialog renders slot "Button": check for infinite recursion.
   [F8] "react" resolves to 2 copies: app -> node_modules/react, @acme/core -> node_modules/@acme/core/node_modules/react. Contexts/hooks break at runtime. Dedupe the install.
   [F8] "react" is bundled from 2 locations (node_modules/react, ../sdk/node_modules/react): dedupe it (resolve.dedupe / alias / single install).
@@ -356,7 +362,7 @@ Generated from a `defineSlots()` table in the SDK source.
 ```
 
 - **`stuntDouble`** is the semver range of the tool that may read this manifest. The generator refuses an unknown `schema` or a tool version outside the range (fail closed).
-- **`kind`** is `client`, `shared` or `server`. Only `client` gets `"use client"` and the not-async check.
+- **`kind`** is `client`, `shared` or `server` for a component slot, or `value` for anything else (§6.6). Only `client` gets `"use client"` and the not-async check. A kind the installed stunt-double does not know fails generation with `[SETUP] … Upgrade stunt-double` (fail closed: it would otherwise be checked against the wrong contract).
 - **`consumers`** is computed by `sdk-lint` from the dist graph. It feeds the W7 warning.
 - **Renames and removals** are declared by the version that makes them. A later major declares `"ActionButton": { …, "renamedFrom": ["Button"] }` and `"removedSlots": { "Tooltip": "use the Popover slot (removed in 2.0.0)" }`. That turns upgrade breakage into an F2 with exact instructions [V].
 
@@ -857,6 +863,50 @@ export function runTypeGate(p) {
 - App code is therefore typed by the **override** (a proven supertype of the contract props), and **go-to-definition lands on `src/overrides/Button.tsx`** [V TS 5.9 language service; U tsgo LSP].
 - Un-overridden slots land on the SDK's `original` declaration.
 - Errors appear as squiggles on the exact assertion line, with the reason in the type text.
+
+### 6.6 Value slots
+
+A slot of kind `value` is anything an SDK lets a project replace that is not a component: a service object, an API client, a function, a hook, a class, a config object. Resolution is identical to a component slot (socket → shim → override or `original/*`); generation, the dist scan, the wiring self-test, the audit and every adapter treat both kinds the same. Only three things differ.
+
+**The contract is the value's whole type, in `SlotTypes`.** Component slots keep `SlotProps` (their props); `sdk-lint` rejects a slot whose contract is filed under the wrong interface. `SlotName` is `keyof SlotProps | keyof SlotTypes`.
+
+```ts
+// @acme/core contracts (the fixture)
+export type FormatPrice = (amount: number, currency?: string) => string;
+export interface Analytics { readonly id: string; track(event: string, data?: Record<string, unknown>): void }
+export interface SlotTypes { formatPrice: FormatPrice; analytics: Analytics }
+```
+
+**Two assertions per implementation** replace the five component assertions:
+
+```ts
+// ---- slot "analytics" <- src/overrides/analytics.ts#analytics (value)
+import { analytics as analytics__impl } from '../src/overrides/analytics.js';       // [F5]
+export const analytics__impl__fits: SlotTypes['analytics'] = analytics__impl;          // [F1] plain assignability
+export const analytics__impl__argsFit: FitsArgs<SlotTypes['analytics'], typeof analytics__impl> = true;  // [F1] parameters
+```
+
+`fits` alone is not enough. TypeScript compares function parameters **bivariantly** when `strictFunctionTypes` is off (strict off, Next's default tsconfig), and **method** parameters bivariantly even when it is on. So `track(event: 'page_view')` is assignable to `track(event: string)`, and the SDK would call it with `'add_to_cart'`. `argsFit` compares argument tuples instead of function types, which is strict-independent. It checks that every argument list the contract allows starts with something the implementation accepts (`ArgsOf<C> extends [...ArgsOf<I>, ...unknown[]]`). It does this for the value itself and for each top-level member, including optional ones, and for constructors through `ConstructorParameters`.
+
+Verified in TypeScript 7.0.2 and 5.9.3, strict on and off [S]:
+
+| Implementation | `fits` | `argsFit` | Result |
+|---|---|---|---|
+| typed `SlotTypes['X']`; a function declaration; fewer parameters; extra optional or rest parameters; a generic function | ok | ok | **pass** |
+| a class instance with extra members; a constructor with the contract's parameters | ok | ok | **pass** |
+| wrong return type, missing member, extra required parameter | TS2322 | | **fail** |
+| narrowed function parameter (`amount: 1 \| 2`) | TS2322 with strict on; **passes** with strict off | TS2322 `narrows the parameters of the contract` | **fail** |
+| narrowed method parameter (`track(event: 'page_view')`) | **passes**, strict on or off | TS2322 `narrows the parameters of these members: "track"` | **fail** |
+| narrowed constructor parameter | passes with strict off | TS2322 | **fail** |
+
+**Messages.** F7 for a value slot is a circular import that reads the slot before it is initialized, not an infinite render. W7 warns that an override importing an SDK export which uses the slot must not use it during module initialization. `"use client"` is never emitted for a value shim (a value is not a client reference), and F9 does not apply.
+
+**What stays runtime.** Swinject's object scopes map to module semantics: one instance per bundle (container scope) by default, and a factory for anything per-call (transient scope, runtime arguments). Choosing an implementation **at runtime** (per user, per feature flag, per test) is by definition not a build-time decision. Inject a factory or strategy object that decides at runtime; tests keep using `vi.mock` / `jest.mock`.
+
+**Known gaps.**
+- `argsFit` checks top-level members only; a nested object's methods get plain assignability.
+- For an overloaded function, `Parameters<>` sees only the last overload.
+- Optional contract members are checked when the implementation has them; an implementation may omit them, as TypeScript allows.
 
 ---
 

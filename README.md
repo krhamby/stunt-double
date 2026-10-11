@@ -1,6 +1,6 @@
 # stunt-double
 
-**Build-time component injection for React + TypeScript.** A project replaces UI components of a product SDK with its own, and every injection mistake fails the build or shows in the dev overlay. It never becomes a runtime crash, and an override never silently fails to apply.
+**Build-time dependency injection for React + TypeScript.** A project replaces parts of a product SDK with its own: UI components, and also services, functions and objects (an analytics client, an API client, a formatter). Every injection mistake fails the build or shows in the dev overlay. It never becomes a runtime crash, and an override never silently fails to apply.
 
 > The SDK component is the lead actor; your override is its stunt double.
 > It has to fit the costume (the SDK's props contract), or it doesn't get on set: the build fails.
@@ -12,6 +12,8 @@ Runtime DI (Swinject, a React context registry) finds a missing registration, a 
 | Swinject (runtime) | stunt-double (build time) |
 |---|---|
 | `container.register(Button.self) {…}` | the file `src/overrides/Button.tsx` |
+| `container.register(Analytics.self) {…}` (any type, not only views) | the file `src/overrides/analytics.ts` (a [value slot](#value-slots-inject-anything-not-only-components)) |
+| the protocol a registration must conform to | the SDK's contract: `SlotProps['Button']` for a component, `SlotTypes['analytics']` for a value |
 | `resolve()` | a static `import` |
 | a wrong registration, a missing registration, or a type mismatch crashes at runtime | a non-zero exit from `vite build` / `next build` / `webpack` / `tsc`, or an overlay in the dev server, with an `[Fx]` message that names the file and the fix |
 
@@ -76,6 +78,47 @@ stunt-double: 2 injection errors (@acme/core@1.0.0)
 ```
 
 The full list of mistakes, and how each tool reports them, is the [failure catalogue](docs/DESIGN.md#2-failure-catalogue-the-north-star).
+
+## Value slots: inject anything, not only components
+
+A slot does not have to be a component. An SDK can declare a **value slot** (`"kind": "value"` in its manifest) for anything it wants a project to be able to replace: an analytics service, an API client, a formatter, a hook, a class, a config object. The SDK calls it through the same kind of socket import, and the project answers it the same way: one file in `src/overrides/`, named after the slot.
+
+```ts
+// @acme/core contracts: a value slot's contract is its whole type, in SlotTypes (components keep SlotProps)
+export interface Analytics { readonly id: string; track(event: string, data?: Record<string, unknown>): void }
+export interface SlotTypes {
+  formatPrice: (amount: number, currency?: string) => string;
+  analytics: Analytics;
+}
+
+// @acme/core ProductCard: calls the socket, never its own default
+import { analytics } from '@acme/core-slots/analytics';
+analytics.track('add_to_cart', { product: product.id });
+```
+
+```ts
+// src/overrides/analytics.ts: every event the SDK reports lands here
+import type { Analytics } from '@acme/core';
+
+class BrandAnalytics implements Analytics {
+  readonly id = 'brand';
+  track(event: string, data?: Record<string, unknown>) { segment.track(event, data); }
+}
+export const analytics = new BrandAnalytics();
+
+// src/overrides/formatPrice.ts: a plain function works the same way
+import type { SlotTypes } from '@acme/core/contracts';
+export const formatPrice: SlotTypes['formatPrice'] = (amount, currency = 'USD') => `${currency} ${amount.toFixed(2)}`;
+```
+
+The same mistakes fail the build: a typo'd file name ([F2]), a missing required value ([F3]), a wrong export ([F5]), an override that imports itself through `@acme/core` ([F7], which is a circular import here rather than an infinite render). The contract check is stricter than plain TypeScript assignability. TypeScript lets an implementation **narrow a parameter** when `strict` is off, and lets a **method** narrow its parameters even when `strict` is on. stunt-double compares the argument lists itself, so this fails:
+
+```
+stunt-double: 1 injection error (@acme/core@1.0.0)
+  [F1] analytics (src/overrides/analytics.ts): narrows the parameters of these members: "track" (the SDK may pass any value its contract allows: accept the contract's parameter types) (tsc 7.0.2, 123 ms)
+```
+
+Fewer parameters, optional extras, rest parameters, generics, class instances and constructors all pass. What a build-time container cannot do is choose an implementation **at runtime** (per user, per feature flag). For that, inject a factory or a strategy object that decides at runtime. Details are in [DESIGN.md §6.6](docs/DESIGN.md#66-value-slots).
 
 ## Tool support
 

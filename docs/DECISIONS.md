@@ -162,6 +162,21 @@ B's other structural choices are also kept:
 
 ---
 
+## 8. Value slots (after the first milestone)
+
+The north star is about *injection* mistakes, and an SDK injects more than components: analytics, API clients, formatters, feature configuration. Runtime DI containers such as Swinject register any type. The first milestone only checked components, so everything else still needed a runtime registry, which is exactly the failure mode this project removes.
+
+**Decision: a fourth slot kind, `value`, on the same mechanism.** Sockets, shims, the alias, the placeholder, the dist scan, the audit and every adapter are kind-agnostic: a shim re-exports a binding, whatever it is. Only the contract changes: `SlotTypes['X']` (the whole type) instead of `SlotProps['X']` (props). Kinds a tool version does not know fail generation (`[SETUP]`), so an older stunt-double can never check a new kind against the wrong contract.
+
+**Alternatives rejected:**
+- *A separate "services" mechanism* (a generated registry object, or a provider). It would put the decision back at runtime, or add a second resolution path to verify in every tool.
+- *Plain assignability as the contract.* It accepts a narrowed method parameter even under `strict`, and a narrowed function parameter with strict off (DESIGN §6.6). The check file adds `argsFit`, which compares argument tuples. That comparison is strict-independent, it was verified in TS 7.0.2 and 5.9.3 with strict on and off [S], and it has no false positives on fewer, optional, rest or generic parameters, class instances or constructors.
+- *Forcing `strictFunctionTypes` in the gate's tsconfig.* It would still miss methods (they are bivariant by design), and it would type-check the override files under different rules than the app.
+
+**Evidence:** the core unit tests (`value-slots.test.mjs`, real tsc, strict on and off) and the Vite suite's V1a–V7 scenarios. Those run on the fixture SDK's `formatPrice` (a function its checkout total calls) and `analytics` (a service object its ProductCard calls), under TypeScript 7 and 5.9, plus two scenarios in the universal tier.
+
+---
+
 ## Open questions
 
 These are to be settled by the reference implementation's acceptance tests.
@@ -177,5 +192,6 @@ These are to be settled by the reference implementation's acceptance tests.
 - Can TypeScript 7 (tsgo) Yarn PnP support, and the tsgo LSP's go-to-definition through tsconfig `paths` into generated `.d.ts`, be relied on in later 7.x releases?
 - Windows: realpath/junction behaviour of npm `file:` links, recursive `fs.watch`, alias regex path separators, and case-insensitive F2/F4 scanning are all untested.
 - npm workspaces with several apps: is adapter-only wiring (no link) acceptable everywhere, or should `init` use `install-strategy=nested` / per-app installs to keep the universal tier?
+- Value slots: should `argsFit` recurse into nested objects (`client.users.get(id)`) and check every overload of an overloaded function? Today it checks top-level members, and `Parameters<>` sees only the last overload. A `kind: "value"` server-only service (an override importing `server-only`) is allowed; does any RSC setup need a dedicated server-value kind?
 - W7 consumer-cycle detection: should it be an error when the consumer always renders the slot (the manifest could mark `alwaysRenders`), or stay a warning?
 - Metro/Expo, Storybook webpack builder, Gatsby, Farm, Astro and React Router 8 adapters are designed from host APIs and lab evidence only. Which of them should be in the first reference-implementation milestone?
