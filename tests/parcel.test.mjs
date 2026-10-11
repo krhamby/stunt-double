@@ -333,49 +333,76 @@ describe('mistake catalogue', () => {
 });
 
 // -------------------------------------------------------------------------------------------------------------
-// `parcel serve` with the plugin: the [Fx] text reaches the terminal and the dev error page, and the server
-// recovers on the next save after the fix (no restart).
-describe('dev server (T1)', () => {
-  let srv, log = '', port;
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const waitFor = async (re, from, ms = 30_000) => {
-    const t = Date.now();
-    while (Date.now() - t < ms) { if (re.test(log.slice(from))) return true; await sleep(100); }
-    throw new Error(`timed out waiting for ${re} in:\n${log.slice(from)}`);
-  };
-  const page = async () => (await fetch(`http://127.0.0.1:${port}/`)).text();
-  const step = async (mutate, re) => { const from = log.length; mutate(); await waitFor(re, from); await sleep(300); };
+// `parcel serve` in three set-ups: with the plugin (T1), universal tier under `stunt-double watch --` (poisoned
+// shims) and bare universal tier. Per case: { error: RegExp } = the build fails with that text in the terminal
+// AND on the dev error page, and the next build after the fix is clean (no restart); { silent: true } = nothing
+// is reported (the page keeps serving the previous decision).
+const DEV_CASES = {
+  F2a: { break: () => write('src/overrides/Buton.tsx', orig(BTN)), fix: () => rm('src/overrides/Buton.tsx') },
+  F3: { break: () => rm('src/overrides/Logo.tsx'), fix: () => write('src/overrides/Logo.tsx', orig('src/overrides/Logo.tsx')) },
+  F1a: { break: () => write(BTN, orig(BTN).replace("props: SlotProps['Button'])", "props: SlotProps['Button'] & { tone: 'loud' })")), fix: () => write(BTN, orig(BTN)) },
+};
+const DEV_MODES = [
+  { name: 'T1 plugin: parcel serve', cmd: ['npx', 'parcel', 'serve'], prepare() {},
+    expect: { F2a: { error: /\[F2\] src\/overrides\/Buton\.tsx overrides unknown slot "Buton"/ }, F3: { error: /\[F3\] required slot "Logo" has no implementation/ }, F1a: { error: /\[F1\] Button \(src\/overrides\/Button\.tsx\): TS2322/ } } },
+  { name: 'universal: stunt-double watch -- parcel serve', cmd: ['npx', 'stunt-double', 'watch', '--', 'npx', 'parcel', 'serve'], prepare: () => rm('.parcelrc'),
+    expect: { F2a: { error: /STUNT-DOUBLE-ERROR -- \[F2\] src overrides Buton\.tsx overrides unknown slot Buton/ }, F3: { error: /STUNT-DOUBLE-ERROR -- \[F3\] required slot Logo has no implementation/ }, F1a: { silent: true } } },
+  { name: 'universal: bare parcel serve', cmd: ['npx', 'parcel', 'serve'], prepare: () => rm('.parcelrc'),
+    expect: { F2a: { silent: true }, F3: { error: /Failed to resolve '\.\.\/\.\.\/src\/overrides\/Logo\.tsx' from '\.\/sdk-slots\/gen\/Logo\.jsx'/ }, F1a: { silent: true } } },
+];
 
-  before(async () => {
-    reset();
-    port = 41000 + Math.floor(Math.random() * 2000);
-    srv = spawn('npx', ['parcel', 'serve', '--target', 'app', '--port', String(port), '--host', '127.0.0.1'], { cwd: app, env: { ...process.env, FORCE_COLOR: '0', COLUMNS: '500', LINES: '50' }, detached: true });
-    srv.stdout.on('data', (d) => { log += d; });
-    srv.stderr.on('data', (d) => { log += d; });
-    await waitFor(/Built in/, 0, 60_000);
-  });
-  after(async () => {
-    // Parcel writes its cache on SIGTERM after npx has exited: wait for the whole process group.
-    try { process.kill(-srv.pid, 'SIGTERM'); } catch {}
-    const t = Date.now();
-    while (Date.now() - t < 20_000) { try { process.kill(-srv.pid, 0); } catch { return; } await sleep(100); }
-    try { process.kill(-srv.pid, 'SIGKILL'); } catch {}
-  });
+for (const mode of DEV_MODES) {
+  describe(`dev server, ${mode.name}`, () => {
+    let srv, log = '', port;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const waitFor = async (re, from, ms = 30_000) => {
+      const t = Date.now();
+      while (Date.now() - t < ms) { if (re.test(log.slice(from))) return true; await sleep(100); }
+      throw new Error(`timed out waiting for ${re} in:\n${log.slice(from)}`);
+    };
+    const page = async () => (await (await fetch(`http://127.0.0.1:${port}/`)).text()).replaceAll('&quot;', '"').replaceAll('&#39;', "'");
+    const APP_PAGE = /<div id=root><\/div>|<div id="root"><\/div>/;
 
-  const cases = [
-    { id: 'F2a', break: () => write('src/overrides/Buton.tsx', orig(BTN)), fix: () => rm('src/overrides/Buton.tsx'), re: /\[F2\] src\/overrides\/Buton\.tsx/ },
-    { id: 'F3', break: () => rm('src/overrides/Logo.tsx'), fix: () => write('src/overrides/Logo.tsx', orig('src/overrides/Logo.tsx')), re: /\[F3\] required slot "Logo"/ },
-    { id: 'F1a', break: () => write(BTN, orig(BTN).replace("props: SlotProps['Button'])", "props: SlotProps['Button'] & { tone: 'loud' })")), fix: () => write(BTN, orig(BTN)), re: /\[F1\] Button/ },
-  ];
-  for (const c of cases) {
-    test(`${c.id}: error in terminal and dev error page, cleared on fix`, async () => {
-      assert.match(await page(), /<div id=root>|<div id="root">/);
-      await step(c.break, /Build failed[\s\S]*\[F\d\]/);
-      assert.match(log, c.re);
-      const html = (await page()).replaceAll('&quot;', '"');
-      assert.match(html, c.re);
-      await step(c.fix, /Built in/);
-      assert.doesNotMatch(await page(), /Parcel encountered errors/);
+    before(async () => {
+      reset();
+      mode.prepare();
+      port = 41000 + Math.floor(Math.random() * 4000);
+      srv = spawn(mode.cmd[0], [...mode.cmd.slice(1), '--target', 'app', '--port', String(port), '--host', '127.0.0.1'], { cwd: app, env: { ...process.env, FORCE_COLOR: '0', COLUMNS: '500', LINES: '50' }, detached: true });
+      srv.stdout.on('data', (d) => { log += d; });
+      srv.stderr.on('data', (d) => { log += d; });
+      await waitFor(/Built in/, 0, 60_000);
     });
-  }
-});
+    after(async () => {
+      // Parcel writes its cache on SIGTERM after npx has exited: wait for the whole process group.
+      try { process.kill(-srv.pid, 'SIGTERM'); } catch {}
+      const t = Date.now();
+      while (Date.now() - t < 20_000) { try { process.kill(-srv.pid, 0); } catch { return; } await sleep(100); }
+      try { process.kill(-srv.pid, 'SIGKILL'); } catch {}
+    });
+
+    for (const [id, c] of Object.entries(DEV_CASES)) {
+      const want = mode.expect[id];
+      test(`${id}: ${want.error ? 'error in terminal and on the dev error page, cleared on fix' : 'SILENT (nothing reported)'}`, async () => {
+        assert.match(await page(), APP_PAGE);
+        let from = log.length;
+        c.break();
+        if (want.silent) {
+          await sleep(3000);
+          assert.doesNotMatch(log.slice(from), /Build failed/);
+          assert.match(await page(), APP_PAGE);
+        } else {
+          await waitFor(/Build failed/, from);
+          await waitFor(want.error, from);
+          await sleep(300);
+          assert.match(await page(), want.error);
+        }
+        from = log.length;
+        c.fix();
+        if (want.error) await waitFor(/Built in/, from);
+        else await sleep(2000);
+        await sleep(300);
+        assert.match(await page(), APP_PAGE);
+      });
+    }
+  });
+}
