@@ -30,8 +30,20 @@ const NAME = 'stunt-double';
  */
 export function withStuntDouble(nextConfig = {}, opts = {}) {
   if (typeof nextConfig === 'function')
-    return /** @type {any} */ (async (...args) => wrap(await nextConfig(...args), opts));
-  return /** @type {any} */ (wrap(nextConfig, opts));
+    return /** @type {any} */ (async (phase, ...rest) => {
+      const c = await nextConfig(phase, ...rest);
+      return phase === PHASE_PRODUCTION_SERVER ? c : wrap(c, opts);
+    });
+  return /** @type {any} */ (isNextStart() ? nextConfig : wrap(nextConfig, opts));
+}
+
+// `next start` serves a build that was validated when it was built: nothing is bundled any more, so it must not
+// depend on (or rewrite) the current source tree. Detected exactly through `phase` for config functions, and for
+// config objects only when the process is unambiguously `next start` (anything else stays strict: fails loud).
+const PHASE_PRODUCTION_SERVER = 'phase-production-server';
+function isNextStart() {
+  const [, bin = '', cmd] = process.argv;
+  return cmd === 'start' && /[\\/]next(?:[\\/]dist[\\/]bin[\\/]next|\.js|\.cmd)?$/.test(bin);
 }
 
 // Next prints a config-load error's enumerable props after its message: keep `problems` (already in the
