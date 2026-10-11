@@ -5,16 +5,13 @@
   "description": "A project that injects its own components into @acme/core with stunt-double, tested with Vitest 5: node and jsdom projects, a browser-mode config, and an unwired config that must fail.",
   "type": "module",
   "scripts": {
-    "postinstall": "stunt-double gen --no-fail",
     "test": "vitest run",
     "test:browser": "vitest run -c vitest.browser.config.ts",
     "typecheck": "tsc -b",
-    "check": "stunt-double check",
     "ci": "stunt-double check && vitest run"
   },
   "dependencies": {
     "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
-    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -32,5 +29,8 @@
     "typescript": "7.0.2",
     "vite": "8.3.4",
     "vitest": "5.0.3"
+  },
+  "overrides": {
+    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz"
   }
 }

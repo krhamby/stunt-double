@@ -10,6 +10,9 @@ The reference project is [`examples/customer-jest`](../../examples/customer-jest
 
 ## Setup
 
+1. `npm i -D stunt-double`
+2. Wrap your Jest config:
+
 ```js
 // jest.config.mjs
 import { withStuntDouble } from 'stunt-double/jest';
@@ -20,7 +23,10 @@ export default withStuntDouble({
 });
 ```
 
-That is all for babel-jest. For @swc/jest, keep your `transform` entry as usual. It must cover `.jsx`, because
+3. Put overrides in `src/overrides/<Slot>.tsx` (for example `src/overrides/Button.tsx` exporting `Button`).
+
+That is all for babel-jest: no tsconfig, `.gitignore` or `package.json` changes. Generated files go to
+`.stunt-double/`, which ignores itself in git. For @swc/jest, keep your `transform` entry as usual. It must cover `.jsx`, because
 the generated shims are `.jsx` files:
 
 ```js
@@ -46,7 +52,7 @@ export default withStuntDouble({ testEnvironment: 'jsdom' }, { typecheck: true }
 
 | Key | Value |
 |---|---|
-| `moduleNameMapper` | `^@acme/core-slots/([A-Za-z0-9_]+)$` → `<root>/sdk-slots/gen/$1.jsx`, placed **before** your own entries. Jest applies it to requires from inside `node_modules` too, so SDK components render your overrides. |
+| `moduleNameMapper` | `^@acme/core-slots/([A-Za-z0-9_]+)$` → `<root>/.stunt-double/gen/$1.jsx`, placed **before** your own entries. Jest applies it to requires from inside `node_modules` too, so SDK components render your overrides. |
 | `transformIgnorePatterns` | if you did not set it: everything in `node_modules` except the SDK, written to match pnpm's `.pnpm/` layout as well (`transformIgnorePatternsFor()` is exported if you need to extend it). If you set it and it would skip the SDK or the shims, the config is refused with `[F6]`. |
 | `watchPlugins` | a plugin that regenerates the shims on every file change during `jest --watch` (opt out with `{ watch: false }`). |
 
@@ -54,9 +60,9 @@ The project root is `opts.root`, else `rootDir`, else the current directory.
 
 ### Without the wrapper (universal tier)
 
-Jest also works with no stunt-double code in its config: `@acme/core-slots` is linked to `./sdk-slots`, and
-jest-resolve follows the link to the generated shims. Nothing validates in that setup, so chain the check, and
-transform both the SDK and the slot package:
+Jest also works with no stunt-double code in its config if the slot package is linked into the project
+(`npx stunt-double init --universal`, see the main docs): jest-resolve follows the link to the generated shims.
+Nothing validates in that setup, so chain the check, and transform both the SDK and the slot package:
 
 ```js
 // jest.config.mjs
