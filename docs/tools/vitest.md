@@ -87,9 +87,8 @@ Every row was observed in `tests/vitest.test.mjs`.
 | F4 | Two files claim one slot | exit 1, `[F4]` | same | exit 1 |
 | F5 | Wrong export name | exit 1, `[F5]` | same | exit 1 |
 | F6a | Installed SDK imports a default directly | exit 1, `[F6]` | same | exit 1 |
-| F6b | Registry placeholder instead of the link | exit 1, `[F6] … the registry placeholder` | same | exit 1 |
-| F6b | A Vitest config **without** the plugin (link installed) | test files fail: `Unknown file extension ".jsx" for …/sdk-slots/gen/Button.jsx` (node and jsdom) | — | — |
-| F6b | A config without the plugin **and** no link | test files fail: `Cannot find module '…/@acme/core-slots/STUNT-DOUBLE-NOT-WIRED -- … run npx stunt-double doctor'` | — | — |
+| F6b | A Vitest config **without** the plugin, universal-tier link installed | test files fail: `Unknown file extension ".jsx" for …/sdk-slots/gen/Button.jsx` (node and jsdom) | — | — |
+| F6b | A Vitest config **without** the plugin (default install: registry placeholder) | test files fail: `Cannot find module '…/@acme/core-slots/STUNT-DOUBLE-NOT-WIRED -- … run npx stunt-double doctor'` | — | — |
 | F6c | `test.deps.optimizer.client` / `.ssr` includes the SDK | exit 1 at startup, `[F6] Vitest deps.optimizer.ssr pre-bundles @acme/core outside the plugin pipeline` | same | — |
 | F6d | Dependency pre-bundling (browser mode) | prevented: no project module in `node_modules/.vite` after a browser run | — | — |
 | F6g | App code imports `@acme/core/original/*` | exit 1, `[F6]` | same | exit 1 |

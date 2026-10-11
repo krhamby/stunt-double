@@ -28,8 +28,9 @@ const failsAtConfig = (r, code) => {
 describe('positive: overrides render in app code and inside SDK components', () => {
   it('babel-jest, jsdom + node environments (jest.config.mjs)', () => passes(jest()));
   it('@swc/jest (jest.swc.config.mjs)', () => passes(jest('-c', 'jest.swc.config.mjs')));
-  it('universal tier: no mapper, jest-resolve follows the sdk-slots link (chained after stunt-double check)', () => {
-    passes(ws.run('npm', ['run', '-s', 'test:universal']));
+  it('universal tier: no mapper, jest-resolve follows a node_modules/@acme/core-slots -> sdk-slots link (chained after stunt-double check)', () => {
+    ws.linkSlots();
+    try { passes(ws.run('sh', ['-c', 'stunt-double check && jest -c jest.universal.config.mjs'])); } finally { ws.reset(); }
   });
   it('opt-in type gate at config load passes on correct overrides', () => passes(jest('-c', 'jest.typecheck.config.mjs')));
   it('stunt-double check and tsc pass', () => {
@@ -83,12 +84,11 @@ describe('contract mistakes (TYP): babel-jest / @swc/jest never type-check', () 
 });
 
 describe('wiring and graph mistakes (F6)', () => {
-  it('F6b: registry placeholder instead of the link: the adapter refuses at config load', () => {
-    MISTAKES.F6b.apply(ws);
-    try { failsAtConfig(jest(), 'F6'); } finally { ws.reset(); }
+  it('not a mistake: the registry placeholder is installed (what a real install gets) and the adapter maps around it', () => {
+    assert.ok(ws.exists('node_modules/@acme/core-slots/not-wired.js'));
+    passes(jest());
   });
   it('F6b: unwired tool (no adapter, no chain, placeholder installed): every test file fails on the poisoned import, never renders defaults', () => {
-    MISTAKES.F6b.apply(ws);
     try {
       const r = jest('-c', 'jest.universal.config.mjs');
       assert.notEqual(r.code, 0, explain(r));
@@ -98,7 +98,6 @@ describe('wiring and graph mistakes (F6)', () => {
     } finally { ws.reset(); }
   });
   it('F6b: same, with transformIgnorePatterns that skip the placeholder: still fails loudly (ESM not-wired.js cannot load), naming @acme/core-slots/not-wired.js', () => {
-    MISTAKES.F6b.apply(ws);
     ws.edit('jest.universal.config.mjs', (s) => s.replace('@acme/core(-slots)?/', '@acme/core/'));
     try {
       const r = jest('-c', 'jest.universal.config.mjs');
@@ -121,6 +120,7 @@ export default withStuntDouble({ testEnvironment: 'jsdom', transformIgnorePatter
     ws.remove('src/overrides/PriceTag.tsx');
     assert.equal(ws.run('stunt-double', ['gen']).code, 0);
     ws.reset();   // PriceTag.tsx is back, the shim still says "SDK default"
+    ws.linkSlots();
     try {
       assert.match(ws.read('sdk-slots/gen/PriceTag.jsx'), /@acme\/core\/original\/PriceTag/);
       const bare = jest('-c', 'jest.universal.config.mjs');
@@ -133,7 +133,7 @@ export default withStuntDouble({ testEnvironment: 'jsdom', transformIgnorePatter
 });
 
 describe('universal tier, bare `jest` (no wrapper, no `stunt-double check &&`): what is left to native resolution', () => {
-  const bare = () => jest('-c', 'jest.universal.config.mjs');
+  const bare = () => { ws.linkSlots(); return jest('-c', 'jest.universal.config.mjs'); };
   it('F2a: silent: the stray file is simply unused and the tests pass', () => {
     MISTAKES.F2a.apply(ws);
     try { passes(bare()); } finally { ws.reset(); }

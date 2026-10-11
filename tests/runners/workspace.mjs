@@ -76,6 +76,15 @@ export class Workspace {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
+  /** Universal tier: replace the installed registry placeholder with a link node_modules/<pkg> -> <slotsDir>. */
+  linkSlots(pkg = '@acme/core-slots', slotsDir = 'sdk-slots') {
+    const target = path.join(this.dir, 'node_modules', pkg);
+    const backup = `${target}.__orig`;
+    if (fs.existsSync(backup)) fs.rmSync(target, { recursive: true, force: true });
+    else { fs.renameSync(target, backup); this.swaps = [...(this.swaps ?? []), { target, backup }]; }
+    fs.symlinkSync(path.relative(path.dirname(target), path.join(this.dir, slotsDir)), target, 'dir');
+  }
+
   /** Undo every write/remove/swap since the last reset. */
   reset() {
     for (const [f, content] of this.saved) {

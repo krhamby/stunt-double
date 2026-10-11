@@ -103,16 +103,20 @@ describe('contract mistakes (TYP): Vitest never type-checks', () => {
 });
 
 describe('wiring and graph mistakes (F6)', () => {
-  it('F6b: registry placeholder instead of the link: the plugin refuses at startup', () => {
-    MISTAKES.F6b.apply(ws);
-    try { failsAtStartup(vitest(), 'F6'); } finally { ws.reset(); }
+  it('not a mistake: the registry placeholder is installed (what a real install gets) and the plugin aliases around it', () => {
+    assert.ok(ws.exists('node_modules/@acme/core-slots/not-wired.js'));
+    passes(vitest());
   });
-  it('F6b: a second vitest config without the plugin (link installed): Node refuses the .jsx shim, never renders defaults', () => {
-    const r = vitest('-c', 'vitest.unwired.config.ts');
-    assert.notEqual(r.code, 0, explain(r));
-    assert.match(r.out, /Unknown file extension "\.jsx" for .*sdk-slots\/gen\/Button\.jsx/, explain(r));
+  it('F6b: a second vitest config without the plugin, universal-tier link installed: Node refuses the .jsx shim, never renders defaults', () => {
+    ws.linkSlots();
+    try {
+      const r = vitest('-c', 'vitest.unwired.config.ts');
+      assert.notEqual(r.code, 0, explain(r));
+      assert.match(r.out, /Unknown file extension "\.jsx" for .*sdk-slots\/gen\/Button\.jsx/, explain(r));
+    } finally { ws.reset(); }
   });
   it('F6b: the same config with jsdom: fails the same way', () => {
+    ws.linkSlots();
     ws.edit('vitest.unwired.config.ts', (s) => s.replace("environment: 'node', include: ['src/**/*.node.test.tsx']", "environment: 'jsdom', include: ['src/**/*.dom.test.tsx']"));
     try {
       const r = vitest('-c', 'vitest.unwired.config.ts');
@@ -120,8 +124,7 @@ describe('wiring and graph mistakes (F6)', () => {
       assert.match(r.out, /Unknown file extension "\.jsx"/, explain(r));
     } finally { ws.reset(); }
   });
-  it('F6b: config without the plugin AND the placeholder installed: the poisoned import names the fix', () => {
-    MISTAKES.F6b.apply(ws);
+  it('F6b: config without the plugin, placeholder installed (the default install): the poisoned import names the fix', () => {
     try {
       const r = vitest('-c', 'vitest.unwired.config.ts');
       assert.notEqual(r.code, 0, explain(r));
@@ -136,8 +139,8 @@ describe('wiring and graph mistakes (F6)', () => {
     try {
       const r = vitest('-c', 'vitest.mixed.config.ts');
       assert.notEqual(r.code, 0, explain(r));
-      assert.match(r.out, /Unknown file extension "\.jsx"/, explain(r));
-      assert.match(r.out, /Tests\s+2 passed \(2\)/, 'the inline project (no `extends`) still gets the plugin in Vitest 5');
+      assert.ok(r.out.includes(NOT_WIRED), explain(r));
+      assert.match(r.out, /Tests\s+2 passed \(2\)/, 'the inline project (no `extends`) still gets the plugin in Vitest 5: with only the placeholder installed it could not render otherwise');
     } finally { ws.reset(); }
   });
   for (const env of ['client', 'ssr']) {

@@ -8,14 +8,13 @@
     "postinstall": "stunt-double gen --no-fail",
     "test": "jest",
     "test:swc": "jest -c jest.swc.config.mjs",
-    "test:universal": "stunt-double check && jest -c jest.universal.config.mjs",
     "typecheck": "tsc --noEmit",
     "check": "stunt-double check",
     "ci": "stunt-double check && jest"
   },
   "dependencies": {
     "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
-    "@acme/core-slots": "file:./sdk-slots",
+    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

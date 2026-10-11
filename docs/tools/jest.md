@@ -92,7 +92,7 @@ the same mechanism (no stunt-double code runs).
 | F4 | Two files claim one slot | exit 1, `[F4]` | same | exit 1 | silent (previous shim) |
 | F5 | Wrong export name | exit 1, `[F5]` | same | exit 1 | **runtime**: "Element type is invalid … got: undefined" (CommonJS interop) |
 | F6a | Installed SDK imports a default directly | exit 1, `[F6]` | same | exit 1 | silent default inside that SDK component |
-| F6b | Registry placeholder instead of the link | exit 1, `[F6] … the registry placeholder` | same | exit 1 | every test file fails: `Cannot find module './STUNT-DOUBLE-NOT-WIRED -- …'` |
+| F6b | A Jest config without the wrapper (only the registry placeholder installed) | — | — | — | every test file fails: `Cannot find module './STUNT-DOUBLE-NOT-WIRED -- …'` |
 | F6c | `transformIgnorePatterns` skips the SDK | exit 1, `[F6] Jest transformIgnorePatterns entry …` | same | — | loud: Jest cannot load the ESM SDK |
 | F6g | App code imports `@acme/core/original/*` | exit 1, `[F6]` | same | exit 1 | silent at that call site |
 | F6h | Override added without regenerating | regenerated at config load (and by the watch plugin) | same | regenerated | previous decision (your tests may notice) |
