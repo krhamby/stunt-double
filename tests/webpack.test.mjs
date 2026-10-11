@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './harness/util.mjs';
-import { defineToolSuite } from './harness/index.mjs';
+import { defineToolSuite, watchProbe } from './harness/index.mjs';
 
 // Mistakes Jest must also refuse at startup (withStuntDouble() validates when Jest loads jest.config.mjs).
 const ALSO_JEST = ['F2a'];
@@ -35,6 +35,7 @@ defineToolSuite({
     command: 'webpack --mode production --config webpack.unwired.config.mjs',
   },
   expectations: (m) => (ALSO_JEST.includes(m.id) ? { also: [{ command: 'test' }] } : undefined),
+  devProbe: watchProbe({ command: 'webpack --mode development --watch' }),
   universal: {
     files: { 'webpack.universal.config.mjs': withoutAdapter() },
     build: 'stunt-double check && webpack --mode production --config webpack.universal.config.mjs',

@@ -22,6 +22,7 @@ import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, webpackGraph } from '../core/audit.mjs';
 import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
 import { adapterOptions } from '../core/config.mjs';
+import { isInside } from '../core/util.mjs';
 
 const NAME = 'stunt-double';
 
@@ -57,6 +58,15 @@ class StuntDoublePlugin {
       // "missing": drop both directories (purge takes path prefixes) from the cached input file system, or a
       // fixed mistake keeps failing on a stale "Can't resolve" until restart.
       compiler.inputFileSystem?.purge?.([this.p.overridesDir, this.p.genDir, ...this.p.changedFiles]);
+      // The watcher timed every file BEFORE this rewrite (by this compiler, or by another compiler of the same
+      // project, which leaves changedFiles empty here), so the coming compilation would reuse the previous shims and
+      // cache their exports under that content: re-adding a removed override then failed with "module has no
+      // exports" until restart. Forget the times of the generated files, so they are checked again now.
+      if (compiler.fileTimestamps instanceof Map) {
+        const times = new Map(compiler.fileTimestamps);
+        for (const f of times.keys()) if (isInside(f, this.p.outDir)) times.delete(f);
+        compiler.fileTimestamps = times;
+      }
     };
     compiler.hooks.beforeRun.tap(NAME, () => regen('return'));
     compiler.hooks.watchRun.tap(NAME, (c) => {

@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './harness/util.mjs';
-import { defineToolSuite } from './harness/index.mjs';
+import { defineToolSuite, watchProbe } from './harness/index.mjs';
 
 /** The fixture's Rspack config without stunt-double (a second config nobody wired, or the universal tier). */
 const withoutAdapter = () => fs.readFileSync(path.join(REPO_ROOT, 'examples/customer-rspack/rspack.config.mjs'), 'utf8')
@@ -30,6 +30,7 @@ defineToolSuite({
     files: { 'rspack.unwired.config.mjs': withoutAdapter() },
     command: 'rspack build --mode production --config rspack.unwired.config.mjs',
   },
+  devProbe: watchProbe({ command: 'rspack build --mode development --watch' }),
   universal: {
     files: { 'rspack.universal.config.mjs': withoutAdapter() },
     build: 'stunt-double check && rspack build --mode production --config rspack.universal.config.mjs',

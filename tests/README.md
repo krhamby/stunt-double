@@ -223,7 +223,7 @@ Optional blocks:
   pm: 'pnpm',                                       // install the fixture with another package manager
 ```
 
-A dev probe receives the installed fixture (`fx`, reset to pristine), the node:test context and the suite. Use `fx.run()`, `fx.override()`, `fx.pristineText()` and `fx.dir` (a scratch dir next to the app), and `assert` what the developer would see. For Vite-based tools, reuse `viteDevProbe()`.
+A dev probe receives the installed fixture (`fx`, reset to pristine), the node:test context and the suite. Use `fx.run()`, `fx.override()`, `fx.pristineText()` and `fx.dir` (a scratch dir next to the app), and `assert` what the developer would see. For Vite-based tools, reuse `viteDevProbe()`; for a bundler with a `--watch` build, `watchProbe({ command })` (typo, fix, remove and re-add an override, checking every compiler and the render after each).
 
 ### 3. The CI entry
 
