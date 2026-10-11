@@ -62,7 +62,7 @@ as `[F6] … (a copy …)`. With `workspace:*`, Bun's isolated linker symlinks `
 | `setup` | STA (generate); forces `metafile: true`; warms the type gate | generate with poisoned shims; starts a watcher on `src/overrides` |
 | `onStart` | regenerate; STA problems → throw; type gate → throw | Bun calls it once only; not used |
 | `onResolve` `@acme/core-slots/<Slot>` | → `sdk-slots/gen/<Slot>.jsx` | same |
-| `onEnd` | AUD on the metafile → delete the written outputs, throw | never called by Bun 1.4.2 |
+| `onEnd` | `[F6]` if the SDK/sockets stayed external; AUD on the metafile → delete the written outputs, throw | never called by Bun 1.4.2 |
 
 Bun 1.4.2 [V]: a throw or rejected promise in `setup`, `onStart` or `onEnd` rejects the `Bun.build()` promise
 **whether `throw` is `true` or `false`**; it never becomes `{ success: false }`. An unhandled rejection exits
@@ -86,6 +86,8 @@ running the bundle. Every cell was observed by `tests/bun.test.mjs`.
 | F6b | placeholder instead of the link | exit 1 | error page | exit 1 | loud `STUNT-DOUBLE-NOT-WIRED` | loud `STUNT-DOUBLE-NOT-WIRED` |
 | F6f | `file:./sdk-slots` (a copy) | exit 1 | error page | exit 1 | renders a snapshot (stale on the next change) | same |
 | F6g | app imports `@acme/core/original/X` | exit 1 | error page | exit 1 | **silent default at that call site** | only the app's own assertion notices |
+| F6c | SDK left external (`packages: 'external'`, `external: ['@acme/*']`), target node or bun | exit 1 (`[F6] Bun.build leaves "@acme/core" external`, outputs removed) | — | n/a | builds; fails at boot (`STUNT-DOUBLE-NOT-WIRED` without a link) | n/a |
+| — | only the sockets external (`external: ['@acme/core-slots/*']`) | ok: the plugin's `onResolve` wins over `external` | — | n/a | n/a | n/a |
 | F6g | another plugin resolves the socket elsewhere | exit 1 (**audit only**) | — | n/a | n/a | n/a |
 | F6h | stale shims | regenerated at every `Bun.build` | regenerated live | regenerated | loud (previous shim imports a deleted file) | loud |
 | F7 | override renders its own slot | exit 1 | error page | exit 1 | **runtime: Node heap exhausted** | runtime `RangeError: Maximum call stack size exceeded` |
@@ -107,4 +109,6 @@ So: production builds go through `bun build.ts`; every script that uses the `bun
   error page is Bun's (HTTP 500 + overlay showing `Could not resolve "./STUNT-DOUBLE-ERROR -- [F3] …"`).
 - `bun install` with a `bun.lock` keeps the **old** contents of a rebuilt `file:` tarball at the same path, with no
   integrity error [V]. Delete `bun.lock` when you rebuild local tarballs (the test suite always does).
+- Bun's metafile marks *unused* re-exports of a `sideEffects: false` package as `external` (never resolved) and
+  leaves `outputs[].imports` empty; the external guard therefore confirms each specifier in the emitted code.
 - Audit messages name SDK files by their isolated-store realpath (`node_modules/.bun/@acme+core@…/…`).

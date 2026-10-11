@@ -184,6 +184,26 @@ await Bun.build({ entrypoints: ['./src/entry-server.tsx'], root: './src', outdir
     fails(run(BUN, ['bad.ts'], dir), /\[F6\] @acme\/core imports @acme\/core-slots\/Button but sdk-slots\/gen\/Button\.jsx is not in the bundle/);
   });
 
+  // external rules (server targets): externalizing the SDK builds fine natively and fails only at boot, so the
+  // adapter fails the build with [F6]; an external SOCKET alone is overridden by the plugin's onResolve [V].
+  for (const target of ['node', 'bun']) for (const [name, extra, re] of [
+    ["packages: 'external'", "packages: 'external'", /\[F6\] Bun\.build leaves "@acme\/core" external/],
+    ["external: ['@acme/*']", "external: ['@acme/*']", /\[F6\] Bun\.build leaves "@acme\/core" external/],
+    ["external: ['@acme/core-slots/*']", "external: ['@acme/core-slots/*']", null],
+  ]) test(`target ${target}, ${name}: ${re ? '[F6] at build time' : 'the plugin wins, overrides render'}`, () => {
+    const dir = project(`ext-${target}-${name.replace(/\W+/g, '')}`, (d) => write(d, 'ext.ts', `import { stuntDoubleBun } from 'stunt-double/bun';
+await Bun.build({ entrypoints: ['./src/entry-server.tsx'], outdir: './dist-ssr', target: '${target}', format: 'esm', ${extra}, plugins: [stuntDoubleBun()] });
+`));
+    const r = run(BUN, ['ext.ts'], dir);
+    if (re) {
+      fails(r, re);
+      assert.ok(!fs.existsSync(path.join(dir, 'dist-ssr/entry-server.js')), 'outputs removed');
+    } else {
+      passes(r);
+      assertRender(target === 'node' ? cmd.probe(dir) : run(BUN, ['probes/render.mjs', 'dist-ssr/entry-server.js'], dir), POSITIVE);
+    }
+  });
+
   test('a runtime Bun.plugin onResolve (preload) never sees the SDK\'s bare socket specifiers', () => {
     const dir = project('runtime-plugin', (d) => {
       fs.rmSync(path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots'), { force: true });

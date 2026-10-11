@@ -70,11 +70,11 @@ export function stuntDoubleBun(opts = {}) {
 
       resolveSockets(build);
 
-      build.onEnd((result) => {
+      build.onEnd(async (result) => {
         if (audit === false || !p?.sdk || !result?.success) return;
         if (!result.metafile) fail(`stunt-double: Bun.build returned no metafile, so the post-bundle audit could not run (pass audit: false to skip it).`);
         // metafile keys are relative to the process cwd, whatever `root` is [V 1.4.2]
-        const problems = auditGraph(p, bunGraph(result.metafile, process.cwd()));
+        const problems = [...await externalized(p, result.metafile, result.outputs), ...auditGraph(p, bunGraph(result.metafile, process.cwd()))];
         if (!problems.length) return;
         removeOutputs(result.outputs, build.config?.outdir);
         fail(formatProblems(p, problems), problems);
@@ -122,6 +122,29 @@ export function stuntDoubleBun(opts = {}) {
 /** Bun metafile -> graph. Keys are relative to the working directory; the namespace prefix is stripped. */
 export function bunGraph(metafile, cwd) {
   return esbuildGraph(metafile, cwd);
+}
+
+/**
+ * [F6] The SDK, a layer or a socket left external (`packages: 'external'`, `external: ['@acme/*']`): the runtime
+ * would load it natively, where no override applies (the registry placeholder answers the sockets there). Bun
+ * 1.4.2 builds that fine and fails only at boot [V]. An external socket alone never gets here: the plugin's
+ * onResolve wins over `external` [V]. Types-only `<sdk>/contracts` may stay external.
+ * Bun 1.4.2 also marks UNUSED re-exports of a sideEffects:false package as external in metafile.inputs (they are
+ * tree-shaken, never resolved) and leaves metafile.outputs[].imports empty, so each candidate is confirmed
+ * against the emitted code [V].
+ */
+export async function externalized(p, metafile, outputs = []) {
+  const { name, slotPackage } = p.sdk;
+  const pkgs = [...p.packages, slotPackage];
+  const hit = (spec) => spec !== `${name}/contracts` && pkgs.some((n) => spec === n || spec.startsWith(n + '/'));
+  const specs = new Set();
+  for (const info of Object.values(metafile?.inputs ?? {})) for (const i of info.imports ?? []) if (i.external && hit(i.path)) specs.add(i.path);
+  if (specs.size) {
+    const code = (await Promise.all(outputs.filter((o) => /\.[cm]?js$/.test(o.path ?? '')).map((o) => o.text()))).join('\n');
+    for (const s of specs) if (!code.includes(`"${s}"`) && !code.includes(`'${s}'`)) specs.delete(s);
+  }
+  if (!specs.size) return [];
+  return [`[F6] Bun.build leaves ${[...specs].map((s) => `"${s}"`).join(', ')} external: the runtime would load ${specs.size > 1 ? 'them' : 'it'} natively, where slot overrides cannot apply (the registry placeholder answers the sockets there). Bundle ${name}: remove it from \`external\`, or replace \`packages: 'external'\` with an \`external\` list that does not match ${pkgs.join(' / ')}.`];
 }
 
 function removeOutputs(outputs, outdir) {
