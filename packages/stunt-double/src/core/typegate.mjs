@@ -14,7 +14,16 @@ export function resolveTypeScript(p) {
   const ts = readJson(pj);
   const binRel = typeof ts.bin === 'string' ? ts.bin : ts.bin?.tsc;
   if (!binRel) return { error: `[SETUP] package "${name}" (${ts.name}@${ts.version}) has no tsc bin.` };
-  return { name, version: ts.version, major: Number(String(ts.version).split('.')[0]), bin: path.join(path.dirname(pj), binRel) };
+  return { name, version: ts.version, major: Number(String(ts.version).split('.')[0]), bin: path.join(path.dirname(pj), binRel), nodeArgs: pnpNodeArgs(p.root) };
+}
+
+/** Under Yarn PnP, tsc lives inside a zip in .yarn/cache: node needs the PnP runtime to read it at all. */
+function pnpNodeArgs(root) {
+  for (let d = root; ; d = path.dirname(d)) {
+    const f = path.join(d, '.pnp.cjs');
+    if (fs.existsSync(f)) return ['--require', f];
+    if (path.dirname(d) === d) return [];
+  }
 }
 
 /** Write <genDir>/tsconfig.check.json: extends the app tsconfig, program = the check file only (+ what it imports). */
@@ -40,17 +49,22 @@ export function runTypeGate(p, { force = false } = {}) {
   if (p.problems?.length) return Promise.resolve({ ok: false, message: `stunt-double: the type gate did not run because of the injection errors above.`, lines: [] });
   const ts = resolveTypeScript(p);
   if (ts.error) return Promise.resolve({ ok: false, message: `${header(p, 1)}\n  ${ts.error}`, lines: [ts.error] });
-  if (p.isPnP && ts.major >= 7) {
-    const line = `[TS-PNP] TypeScript ${ts.version} cannot resolve modules under Yarn Plug'n'Play: set "typescript": "typescript5" (npm alias of typescript@5.9) in stunt-double.config.json.`;
-    return Promise.resolve({ ok: false, message: `${header(p, 1)}\n  ${line}`, lines: [line] });
-  }
+  // Yarn PnP: TS 7 cannot resolve modules at all, and an unpatched TS 5 (a plain npm: alias) cannot either.
+  // Only Yarn's own patched build works, which is what the `typescript` name gets automatically.
+  const pnpFix = `add "typescript5": "patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>" to devDependencies (Yarn's PnP-patched TypeScript 5.9) and set "typescript": "typescript5" in stunt-double.config.json.`;
+  const pnpLine = p.isPnP && (ts.major >= 7
+    ? `[TS-PNP] TypeScript ${ts.version} cannot resolve modules under Yarn Plug'n'Play: ${pnpFix}`
+    : !/[\\/][^\\/]+-patch-[0-9a-f]{6,}[^\\/]*[\\/]/.test(ts.bin) // .yarn/cache/<name>-patch-<hash>-….zip/
+      ? `[TS-PNP] "${ts.name}" is TypeScript ${ts.version} WITHOUT Yarn's PnP patch, so it cannot resolve modules under Plug'n'Play (a plain "npm:typescript@..." alias is not patched): ${pnpFix}`
+      : null);
+  if (pnpLine) return Promise.resolve({ ok: false, message: `${header(p, 1)}\n  ${pnpLine}`, lines: [pnpLine] });
   const checkText = (() => { try { return fs.readFileSync(p.checkFile, 'utf8'); } catch { return ''; } })();
   const key = `${p.root}|${p.fingerprint}|${sha(checkText)}|${ts.bin}|${ts.version}`;
   if (!force && memo.has(key)) return memo.get(key);
   const tsconfigFile = writeCheckTsconfig(p);
   const run = new Promise((done) => {
     const t0 = performance.now();
-    execFile(process.execPath, [ts.bin, '-p', tsconfigFile, '--pretty', 'false'], { cwd: p.root, maxBuffer: 1 << 26, env: { ...process.env, NODE_OPTIONS: '' } }, (err, stdout, stderr) => {
+    execFile(process.execPath, [...ts.nodeArgs, ts.bin, '-p', tsconfigFile, '--pretty', 'false'], { cwd: p.root, maxBuffer: 1 << 26, env: { ...process.env, NODE_OPTIONS: '' } }, (err, stdout, stderr) => {
       const ms = Math.round(performance.now() - t0);
       const output = `${stdout ?? ''}${stderr ?? ''}`;
       if (!err) return done({ ok: true, ms, version: ts.version, output });

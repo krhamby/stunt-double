@@ -229,7 +229,7 @@ async function cmdDoctor(a) {
     const ts = p.sdk ? resolveTypeScript(p) : { error: true };
     if (!ts.error) {
       try {
-        const list = execFileSync(process.execPath, [ts.bin, '-p', p.tsconfig, '--listFilesOnly'], { cwd: p.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        const list = execFileSync(process.execPath, [...ts.nodeArgs, ts.bin, '-p', p.tsconfig, '--listFilesOnly'], { cwd: p.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
         const want = path.resolve(p.checkFile);
         if (!list.split(/\r?\n/).some((l) => l.trim() && path.resolve(p.root, l.trim()) === want)) errors.push(`[X2] tsc --listFilesOnly -p ${p.tsconfigRel} does not list ${p.rel(p.checkFile)}: add it to "files".`);
         else notes.push(`${p.tsconfigRel} includes ${p.rel(p.checkFile)}`);
