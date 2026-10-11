@@ -64,8 +64,12 @@ export const CASES = {
  * @param {string} t.configFile  'webpack.config.mjs'
  * @param {string[]} t.build     build command (argv, run with npx)
  * @param {string[]} t.dev       dev-server command (argv, run with npx; PORT env)
- * @param {string} t.overlay     CSS selector of the dev-server error overlay
+ * @param {string} t.overlay     CSS selector of the dev-server error overlay (an iframe, or an element with a shadow root)
  * @param {string} t.packageName the tool's package (for the module-replacement audit case)
+ * @param {object} [t.replace]   tool-specific replacements of the non-CASES tests, each (h) => void with h = the
+ *                               suite helpers { fresh, build, render, assertFails, assertRenders, read, write, npmInstall }:
+ *                               'F6b' (unwired config), 'F6-audit' (socket resolved elsewhere)
+ * @param {(h: object) => void} [t.extra] defines additional tool-specific tests (same helpers)
  */
 export function defineSuite(t) {
   const example = path.join(repo, 'examples', `customer-${t.tool}`);
@@ -112,11 +116,13 @@ export function defineSuite(t) {
   });
   after(() => { if (!process.env.KEEP_TMP) fs.rmSync(tmp, { recursive: true, force: true }); });
 
+  const h = { fresh, build, render, assertFails, assertRenders, read, write, npmInstall, packs, sdkPack };
+
   test(`${t.tool}: overrides apply in the app and inside the SDK; replaced default is not bundled`, () => {
     const d = fresh();
     const r = build(d);
     assertRenders(d, r);
-    const client = fs.readdirSync(path.join(d, 'dist')).filter((f) => f.endsWith('.js')).map((f) => read(d, `dist/${f}`)).join('\n');
+    const client = fs.readdirSync(path.join(d, 'dist'), { recursive: true }).filter((f) => f.endsWith('.js')).map((f) => read(d, `dist/${f}`)).join('\n');
     assert.ok(client.includes('BRAND_PRICE') && !client.includes('SDK_DEFAULT_PRICETAG'), 'the SDK default PriceTag must not be in the client bundle');
   });
 
@@ -130,7 +136,8 @@ export function defineSuite(t) {
     });
   }
 
-  test(`${t.tool}: F6b a config without the adapter fails on the registry placeholder`, () => {
+  if (t.replace?.F6b) t.replace.F6b(h);
+  else test(`${t.tool}: F6b a config without the adapter fails on the registry placeholder`, () => {
     const d = fresh();
     fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
     npmInstall(d, '--no-save', path.join(packs, 'acme-core-slots-0.0.1.tgz'));
@@ -138,7 +145,8 @@ export function defineSuite(t) {
     assertFails(build(d), /Module not found[^\n]*STUNT-DOUBLE-NOT-WIRED/);
   });
 
-  test(`${t.tool}: F6 audit: a plugin that resolves a socket elsewhere fails the build`, () => {
+  if (t.replace?.['F6-audit']) t.replace['F6-audit'](h);
+  else test(`${t.tool}: F6 audit: a plugin that resolves a socket elsewhere fails the build`, () => {
     const d = fresh();
     // Wrap the exported config function: prepend a NormalModuleReplacementPlugin to the client compiler.
     write(d, 'audit.config.mjs', `import * as tool from '${t.packageName}';\nimport base from './${t.configFile}';\nconst lib = tool.rspack ?? tool.default;\nexport default (env, argv) => base(env, argv).map((c) => { c.plugins.unshift(new lib.NormalModuleReplacementPlugin(/^@acme\\/core-slots\\/PriceTag$/, '@acme/core/original/PriceTag')); return c; });\n`);
@@ -160,6 +168,8 @@ export function defineSuite(t) {
     const d = fresh();
     await devScenario(d, t);
   });
+
+  t.extra?.(h);
 }
 
 // ---- dev server, driven in a real browser -----------------------------------------------------------------
@@ -196,7 +206,7 @@ async function devScenario(d, t) {
     const page = await browser.newPage();
     await page.goto(`http://localhost:${port}/`);
     const html = () => page.evaluate(() => document.body.innerHTML);
-    const overlay = () => page.evaluate((sel) => { const f = document.querySelector(sel); return f ? (f.contentDocument?.body?.innerText ?? '') : null; }, t.overlay);
+    const overlay = () => page.evaluate((sel) => { const f = document.querySelector(sel); if (!f) return null; return (f.shadowRoot ? f.shadowRoot.textContent : f.contentDocument?.body?.innerText) ?? ''; }, t.overlay);
     const clean = async () => (await overlay()) === null && (await html()).includes('BRAND_BUTTON');
     const shows = (re) => async () => re.test((await overlay()) ?? '');
 
