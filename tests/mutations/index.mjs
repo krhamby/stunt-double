@@ -23,8 +23,9 @@ import f7f9 from './f7-f9.mjs';
 import values from './values.mjs';
 import viteFamily from './vite-family.mjs';
 import webpackFamily from './webpack-family.mjs';
+import nextFamily from './next-family.mjs';
 
-export const catalogue = Object.freeze([...f1, ...naming, ...f6, ...f7f9, ...values, ...viteFamily, ...webpackFamily]);
+export const catalogue = Object.freeze([...f1, ...naming, ...f6, ...f7f9, ...values, ...viteFamily, ...webpackFamily, ...nextFamily]);
 
 const ids = new Set();
 for (const m of catalogue) {
