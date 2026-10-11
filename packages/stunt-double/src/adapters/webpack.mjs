@@ -122,6 +122,12 @@ export class StuntDoublePlugin {
       announceRemovals(c, this.p.overridesDir);
     });
 
+    // A one-shot build with an injection error must fail the process even when the wrapper prints compilation
+    // errors and exits 0 (CRA's build with TSC_COMPILE_ON_ERROR=true does that for every error).
+    compiler.hooks.done.tap(NAME, (stats) => {
+      if (!watching && stats.compilation.errors.some((e) => e?.name === 'StuntDoubleError')) process.exitCode = 1;
+    });
+
     compiler.hooks.thisCompilation.tap(NAME, (compilation) => {
       const p = this.p;
       const ours = new Set();
