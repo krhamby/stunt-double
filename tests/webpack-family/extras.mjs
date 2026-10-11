@@ -3,7 +3,7 @@
 // defineToolSuite({ mutations: (list) => [...list, ...webpackFamilyMutations(t)], devProbe: webpackDevProbe(t) }).
 //
 //   F6c-externals        server build with webpack-node-externals: the adapter keeps the SDK bundled (must pass)
-//   F6c-externals-regex  a RegExp external that captures the SDK: [F6] "... is external in this node build"
+//   F6c-externals-regex  a RegExp external that captures the SDK: [F6] "... is external in this node build" (Gatsby: "node14.15")
 //   F6-audit             a plugin redirects a socket to the SDK default: the post-bundle audit fails the build
 //   F6e-remove / -add    warm persistent cache, then an override removed / added: never the old decision
 import assert from 'node:assert/strict';
@@ -32,8 +32,9 @@ export function unwiredConfig(fixtureDir, configFile) {
  * @param {string} [t.ssrBundle]  the built SSR file (default 'dist-ssr/entry-server.mjs')
  * @param {(value: string) => string} [t.externalsLine]  config text inserted after ssrMarker that sets the server
  *                               build's externals to `value` (default: externalsPresets node + externals)
- * @param {(toolConfig: string) => { file: string, text: string }} [t.auditConfig]  a config file that extends the
- *                               tool config with the redirecting plugin (default: a webpack/Rspack config function)
+ * @param {(toolConfig: string) => { file: string, text: string, run?: string }} [t.auditConfig]  a config file that
+ *                               extends the tool config with the redirecting plugin, and the command that builds with
+ *                               it (default: a webpack/Rspack config function, `${build} --config <file>`)
  */
 export function webpackFamilyMutations(t) {
   const marker = t.ssrMarker ?? "    target: 'node',\n";
@@ -62,7 +63,7 @@ export function webpackFamilyMutations(t) {
       catches: 'AUD (external module in the final graph)',
       tags: ['aud'],
       apply: (fx, suite) => externals(fx, suite, '[/^@acme\\/core/]'),
-      expect: { outcome: 'fail', command: 'build', messages: [/\[F6\] "@acme\/core" is external in this node build/] },
+      expect: { outcome: 'fail', command: 'build', messages: [/\[F6\] "@acme\/core" is external in this node[\w.]* build/] },
     },
     {
       id: 'F6-audit',
@@ -79,7 +80,7 @@ export default async (env, argv) => all(await (typeof base === 'function' ? base
   return c;
 });
 `)),
-      expect: { outcome: 'fail', run: `${t.build} --config ${t.auditConfig ? t.auditConfig('').file : 'audit.config.mjs'}`, messages: [/\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but [^\n]*PriceTag\.jsx is not in the bundle/] },
+      expect: { outcome: 'fail', run: t.auditConfig?.('').run ?? `${t.build} --config ${t.auditConfig ? t.auditConfig('').file : 'audit.config.mjs'}`, messages: [/\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but [^\n]*PriceTag\.jsx is not in the bundle/] },
     },
     {
       id: 'F6e-remove',

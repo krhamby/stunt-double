@@ -5,5 +5,6 @@ import { withStuntDouble } from 'stunt-double/webpack';
 // generated shim, runs the contract type check and the bundle audit, and reports every injection mistake
 // through compilation.errors (non-zero exit in `gatsby build`, error overlay in `gatsby develop`).
 export const onCreateWebpackConfig = ({ actions, getConfig }) => {
-  actions.replaceWebpackConfig(withStuntDouble(getConfig()));
+  const config = getConfig();
+  actions.replaceWebpackConfig(withStuntDouble(config));
 };
