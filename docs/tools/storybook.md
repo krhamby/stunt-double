@@ -12,7 +12,9 @@ typescript 7.0.2, react 19.3.0, node 22.22.0, npm 10.9.4. Examples:
 
 ## Setup
 
-Run `npx stunt-double init` and put your overrides in `src/overrides/` as usual. Then add the adapter.
+Install the tool (`npm i -D stunt-double`), add the one adapter line below, and put each override in
+`src/overrides/<Slot>.tsx`. You don't need tsconfig edits, .gitignore entries, a link dependency or a
+postinstall script. The adapter writes its generated files to `.stunt-double/`, which ignores itself.
 
 ### builder-vite (`@storybook/react-vite`)
 
@@ -75,7 +77,7 @@ observed by `tests/storybook.test.mjs` unless it is marked *not tested*.
 
 | # | Mistake | `storybook build`, builder-vite (vite.config or viteFinal) | `storybook build`, builder-webpack5 | `storybook dev` |
 |---|---|---|---|---|
-| F1a/F1b | Override does not fit the contract (extra required prop, ignores SDK props) | Exit 1 at `buildStart`: `[F1] … TS2322` (type gate, about 150 ms with TS 7) | Exit 1 at `finishModules`: `[F1] … TS2322` (the build runs in `production` mode, so the gate runs) | vite: asynchronous overlay (*not tested*). webpack: **not checked** (development mode has no gate). Covered by `storybook build`, `stunt-double check` and `tsc` |
+| F1a/F1b | Override does not fit the contract (extra required prop, ignores SDK props) | Exit 1 before bundling: `[F1] … TS2322` (type gate, about 150 ms with TS 7) | Exit 1 at `finishModules`: `[F1] … TS2322` (the build runs in `production` mode, so the gate runs) | vite: asynchronous overlay (*not tested*). webpack: **not checked** (development mode has no gate). Covered by `storybook build`, `stunt-double check` and `tsc` |
 | F2 | Typo or stray file (`Buton.tsx`) | Exit 1: `[F2] … did you mean "Button"` | Exit 1: `[F2]` (fails before compiling) | vite: the story shows Storybook's error display and the Vite overlay shows the `[F2]` text; defaults never render. webpack: `storybook dev` exits 1 at startup with `[F2]` |
 | F3 | Required slot (`Logo`) missing | Exit 1: `[F3]` | Exit 1: `[F3]` | same mechanism as F2 (*not tested separately*) |
 | F4 | Two files claim one slot | Exit 1: `[F4]` | Exit 1: `[F4]` | same as F2 (*not tested separately*) |
@@ -103,7 +105,7 @@ where only `storybook dev` runs.
   static-validation problems from `compiler.hooks.run`, before anything compiles. If an unrelated module
   error happens first, webpack stops there. The build still fails, but the type-gate and audit messages are
   not printed.
-- **Universal tier.** If `@acme/core-slots` is linked (`"file:./sdk-slots"`), a Storybook without the
+- **Universal tier.** If `@acme/core-slots` is linked to the generated package, a Storybook without the
   adapter still renders your overrides through the link, but nothing validates them (R1). Use the adapter,
   or put `stunt-double check &&` in front of the Storybook script.
 - **One package with both builders.** A fresh `npm install` fails with ERESOLVE: @vitejs/plugin-react 6 has
