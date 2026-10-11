@@ -33,6 +33,9 @@ export function stuntDouble(opts = {}) {
   const tripwire = {
     name: `${PLUGIN}:optimizer-tripwire`,
     load(id) {
+      // Vite's dependency SCAN runs these plugins too, with project files as entries (Astro passes every src/**
+      // file): reading an entry to find its imports is not pre-bundling it.
+      if (this.getModuleInfo?.(id)?.isEntry) return null;
       if (p?.sdk && p.isProjectSlotFile(cleanId(id)))
         this.error(`[F6] the dependency optimizer tried to pre-bundle ${p.rel(cleanId(id))}: the override decision would be frozen into .vite/deps. Remove custom optimizeDeps settings that pull in ${p.sdk.slotPackage}.`);
     },
