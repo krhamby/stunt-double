@@ -16,12 +16,21 @@ Package managers only matter for two things:
 
 ## The SDK's peer: `@acme/core-slots`
 
-The SDK declares `@acme/core-slots` as a required peer. Your company registry serves a *placeholder* under that
-name whose only content is an import that cannot resolve. npm, pnpm and Bun install it automatically; Yarn
-warns (`YN0002 … doesn't provide @acme/core-slots`) and installs nothing. Both are fine with the adapter. The
-placeholder only matters for a tool you forgot to wire: with it, that tool fails with
-`STUNT-DOUBLE-NOT-WIRED -- … run npx stunt-double doctor`; without it (Yarn), it fails with a plain
-`Could not resolve '@acme/core-slots/Button'`. It never renders the SDK defaults.
+The SDK declares `@acme/core-slots` as a required peer, and your company registry serves a *placeholder* under
+that name whose only content is an import that cannot resolve. We published the SDK and the placeholder to a
+local registry and installed a three-step project with each package manager:
+
+| Package manager | The placeholder peer | Three-step build | A tool you forgot to wire |
+|---|---|---|---|
+| npm 10, pnpm 12, Bun 1.4 | installed automatically | passes, overrides render | fails: `STUNT-DOUBLE-NOT-WIRED -- … run npx stunt-double doctor` |
+| Yarn 4 | not installed; Yarn warns `YN0002 … doesn't provide @acme/core-slots (…), requested by @acme/core` | passes, overrides render | fails with a plain `Could not resolve '@acme/core-slots/Button'` |
+
+Either way, a tool you forgot to wire never renders the SDK defaults. Under Yarn, add the placeholder as a dependency
+(`yarn add @acme/core-slots`) if you want the explanatory message.
+
+Yarn 4 also quarantines package versions published less than `npmMinimalAgeGate` ago (`YN0016 … All versions
+satisfying "1.0.0" are quarantined`). On the day the SDK team publishes a release, either wait or allow the
+company scope in `.yarnrc.yml`: `npmScopes: { acme: { npmMinimalAgeGate: 0 } }`.
 
 ## Universal tier: the link line
 
@@ -118,7 +127,8 @@ The whole shared mistake catalogue (`tests/mutations/`: 30 mistakes plus the Vit
 its `[Fx]` code under all four, with two Yarn differences: the nested-React mistake cannot occur (below), and
 plain Node reports the placeholder through PnP's resolver (`Qualified path resolution failed … STUNT-DOUBLE-NOT-WIRED`)
 instead of `ERR_MODULE_NOT_FOUND`. `tests/package-managers.test.mjs` pins the bare universal-tier column below,
-`tests/pm-wiring.test.mjs` the wiring mistakes, `tests/pm-init.test.mjs` the `init` runs and
+`tests/pm-wiring.test.mjs` the wiring mistakes, `tests/pm-init.test.mjs` the `init` runs, `tests/pm-registry.test.mjs`
+the registry path above (Verdaccio 6.10.5) and
 `tests/typescript-matrix.test.mjs` the contract cases.
 
 ## Which mistakes fail where

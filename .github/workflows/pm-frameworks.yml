@@ -23,8 +23,9 @@ jobs:
       matrix:
         # pnpm / yarn / bun: the Vite fixture + the whole shared catalogue + universal tier with that package
         # manager. package-managers: bare universal-tier residuals under all four. pm-wiring: link mistakes.
-        # pm-init: `stunt-double init` on a fresh create-vite template under all four.
-        suite: [pnpm, yarn, bun, package-managers, pm-wiring, pm-init]
+        # pm-init: `stunt-double init` on a fresh create-vite template under all four. pm-registry: the real user
+        # path through a local Verdaccio (placeholder peer auto-installed by npm/pnpm/Bun, Yarn warns).
+        suite: [pnpm, yarn, bun, package-managers, pm-wiring, pm-init, pm-registry]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
