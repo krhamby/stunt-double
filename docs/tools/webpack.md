@@ -27,4 +27,13 @@ Never use `resolve.plugins` for this (Rspack ignores them) or replace modules in
 
 Options: `withStuntDouble(config, { typecheck, audit, mode, ...anyConfigKey })`.
 
-**Verified with** webpack 5.111.1 + webpack-cli 7.2.3 + Babel 8 (`tests/webpack.test.mjs`) and @rspack/core 2.2.8 + builtin:swc-loader (`tests/rspack.test.mjs`), TypeScript 7.0.2 and 5.9.3: the shared catalogue, the webpack-family scenarios (SSR externals, a user alias bypassing a slot) and the universal tier; plus `webpack --watch` (a typo fails the recompilation, the fix recovers).
+**Rsbuild 2.** Rsbuild builds with Rspack; apply the adapter through `tools.rspack`, which runs once per environment (e.g. `web` and `node`):
+
+```ts
+// rsbuild.config.ts
+export default defineConfig({ plugins: [pluginReact()], tools: { rspack: (config) => withStuntDouble(config) } });
+```
+
+`output.externals` that match the SDK fail the build with `[F6]`, as with webpack's `externals`.
+
+**Verified with** webpack 5.111.1 + webpack-cli 7.2.3 + Babel 8 (`tests/webpack.test.mjs`) @rspack/core 2.2.8 + builtin:swc-loader (`tests/rspack.test.mjs`) and @rsbuild/core 2.2.12 with web + node environments (`tests/rsbuild.test.mjs`), TypeScript 7.0.2 and 5.9.3: the shared catalogue, the webpack-family scenarios (SSR externals, a user alias bypassing a slot) and the universal tier; plus `webpack --watch` (a typo fails the recompilation, the fix recovers).

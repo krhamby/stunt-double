@@ -126,7 +126,8 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 | Rspack 2 | `withStuntDouble()` from `stunt-double/webpack` | **verified** ([page](docs/tools/webpack.md)) |
 | Next.js 16 (Turbopack and `--webpack`; build and dev) | `withStuntDouble()` from `stunt-double/next` | **verified** ([page](docs/tools/next.md)) |
 | Jest 30 | `withStuntDouble()` from `stunt-double/jest` | **verified** ([page](docs/tools/jest.md)) |
-| Rsbuild 2, CRA 5 (craco), Gatsby | `withStuntDouble()` from `stunt-double/webpack` through their webpack/Rspack hook | designed |
+| Rsbuild 2 | `withStuntDouble()` from `stunt-double/webpack` in `tools.rspack` | **verified** ([page](docs/tools/webpack.md)) |
+| CRA 5 (craco), Gatsby | `withStuntDouble()` from `stunt-double/webpack` through their webpack hook | designed |
 | Storybook 10 (builder-vite) | the Vite plugin, from `vite.config.ts` | **verified** ([page](docs/tools/storybook.md)) |
 | Storybook 10 (webpack builder, `webpackFinal`) | `withStuntDouble()` from `stunt-double/webpack` | designed |
 | React Router 8 (framework mode) | the Vite plugin | **verified** ([page](docs/tools/react-router.md)) |
@@ -152,7 +153,8 @@ packages/stunt-double/                  the npm package: core, adapters (stunt-d
 examples/acme-core/                     fixture product SDK, @acme/core: renders its components through sockets
 examples/acme-core-slots-placeholder/   the registry placeholder, @acme/core-slots (fails on purpose when not wired)
 examples/customer-<tool>/               customer apps with the same overrides in src/overrides/: vite (+ Vitest),
-                                        esbuild, webpack (+ Jest), rspack, next, react-router, storybook
+                                        esbuild, webpack (+ Jest), rspack, rsbuild, next, react-router,
+                                        storybook
 tests/                                  the core unit tests run from packages/; one toolchain suite per tool;
                                         the shared mistake catalogue in tests/mutations/
 docs/                                   design, decision record, error reference, SDK-author guide, tool pages
