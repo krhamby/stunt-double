@@ -20,14 +20,18 @@ jobs:
       matrix:
         include:
           - name: jest suite
+            key: jest
             suites: jest
           - name: vitest suite
+            key: vitest
             suites: vitest
             chromium: npx -y playwright@1.64.0 install --with-deps chromium        # Vitest browser mode
           - name: storybook suites
+            key: storybook
             suites: storybook-vite storybook-vite-final storybook-webpack
             chromium: npx -y playwright-core@1.56.1 install --with-deps chromium   # the probes' playwright-core
           - name: metro suite
+            key: metro
             suites: metro
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +43,6 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.suites == 'jest' && 'jest' || matrix.suites == 'vitest' && 'vitest' || matrix.suites == 'metro' && 'metro' || 'storybook' }}-results
+          name: ${{ matrix.key }}-results
           path: /tmp/stunt-double-tests/*/results.json
           if-no-files-found: ignore
