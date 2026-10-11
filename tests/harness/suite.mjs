@@ -36,7 +36,7 @@ export const TYPESCRIPT5 = Object.freeze({ alias: 'typescript5', spec: 'npm:type
  * @param {(list) => list} [spec.mutations]  filter/extend the applicable catalogue
  * @param {boolean|object} [spec.typescript5]  also run the type-gate mutations with TypeScript 5.9 (npm alias)
  * @param {object} [spec.universal]      universal tier: { files, build, bare, mutations: [ids] } (see README)
- * @param {string[]} [spec.outputs]      build output dirs the build may create (simplicity-bar check)
+ * @param {string[]} [spec.outputs]      build output dirs (or single files, e.g. next-env.d.ts) the build may write
  * @param {string} [spec.generatedDir]   where stunt-double may write generated files (default '.stunt-double')
  */
 export function defineToolSuite(spec) {
@@ -214,7 +214,7 @@ function assertSimplicityBar(fx, suite) {
   const allowed = [...suite.outputs, suite.generatedDir].map((d) => `${d.replace(/\/$/, '')}/`);
   const problems = [];
   for (const f of listTree(fx.app)) {
-    if (allowed.some((a) => f.startsWith(a))) continue;
+    if (allowed.some((a) => f.startsWith(a)) || suite.outputs.includes(f)) continue; // an output dir, or a generated file
     if (!pristine.has(f)) problems.push(`created ${f}`);
     else if (fs.readFileSync(path.join(fx.app, f), 'utf8') !== fs.readFileSync(path.join(fx.pristine, f), 'utf8')) problems.push(`modified ${f}`);
   }

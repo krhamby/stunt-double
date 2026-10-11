@@ -27,3 +27,26 @@ test('every message code links to an existing heading in docs/', () => {
     assert.ok(cache.get(file).has(anchor), `${code}: docs/${file} has no heading with anchor #${anchor}`);
   }
 });
+
+test('every relative Markdown link to a .md file (and its #anchor) in the docs resolves', () => {
+  const files = ['README.md', 'tests/README.md', ...fs.readdirSync(path.join(REPO_ROOT, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`),
+    ...fs.readdirSync(path.join(REPO_ROOT, 'docs/tools')).map((f) => `docs/tools/${f}`)];
+  const headings = new Map();
+  const anchorsAt = (abs) => {
+    if (!headings.has(abs)) headings.set(abs, new Set([...fs.readFileSync(abs, 'utf8').matchAll(/^#{1,6} (.+)$/gm)].map((m) => slug(m[1]))));
+    return headings.get(abs);
+  };
+  const broken = [];
+  for (const rel of files) {
+    const abs = path.join(REPO_ROOT, rel);
+    const text = fs.readFileSync(abs, 'utf8').replace(/```[\s\S]*?```/g, '');
+    for (const m of text.matchAll(/\]\(([^)\s]+?)\)/g)) {
+      const [target, anchor] = m[1].split('#');
+      if (/^[a-z]+:/i.test(target) || (target && !target.endsWith('.md'))) continue; // external, or not a doc
+      const file = target ? path.resolve(path.dirname(abs), target) : abs;
+      if (!fs.existsSync(file)) { broken.push(`${rel}: ${m[1]} (no such file)`); continue; }
+      if (anchor && !anchorsAt(file).has(anchor)) broken.push(`${rel}: ${m[1]} (no heading #${anchor})`);
+    }
+  }
+  assert.deepEqual(broken, []);
+});

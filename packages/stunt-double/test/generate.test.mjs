@@ -57,6 +57,23 @@ describe('generate: the positive case', () => {
   });
 });
 
+describe('generate: the slot package as a dependency', () => {
+  test('a file: TARBALL of the slot package (e.g. the placeholder from a local mirror) is an install, not a universal-tier link', () => {
+    const { root } = project({ files: { ...base, 'vendor/acme-core-slots-0.0.1.tgz': 'not really a tarball' }, pkg: { dependencies: { '@acme/core': '1.0.0', '@acme/core-slots': 'file:./vendor/acme-core-slots-0.0.1.tgz' } } });
+    const p = gen(root);
+    assert.deepEqual(p.problems, []);
+    assert.equal(p.tier, 'adapter');
+    assert.equal(path.relative(root, p.outDir), '.stunt-double');
+  });
+
+  test('a file: DIRECTORY of the slot package is the universal-tier link: generated files go there', () => {
+    const { root } = project({ files: { ...base, 'sdk-slots/package.json': { name: '@acme/core-slots', version: '0.0.0', private: true } }, pkg: { dependencies: { '@acme/core': '1.0.0', '@acme/core-slots': 'file:./sdk-slots' } } });
+    const p = gen(root);
+    assert.equal(p.tier, 'universal');
+    assert.equal(path.relative(root, p.outDir), 'sdk-slots');
+  });
+});
+
 describe('generate: F2 unknown slot', () => {
   test('a typo is an error with a "did you mean" hint, never an unused file', () => {
     const { root } = project({ files: { ...base, 'src/overrides/Buton.tsx': SRC.wrapButton } });

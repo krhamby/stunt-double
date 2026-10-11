@@ -1,6 +1,6 @@
 // Package managers the harness can install a fixture with, and how each one spells the universal-tier link
-// (DESIGN.md §4.4). Only npm is exercised by the suites in this repository so far; the other rows are the
-// documented commands, ready for a package-manager suite to use (and correct if reality differs).
+// (DESIGN.md §4.4). npm (every suite) and pnpm (tests/vite-pnpm.test.mjs) are exercised; the yarn and bun rows
+// are the documented commands, ready for a package-manager suite to use (and correct if reality differs).
 export const PACKAGE_MANAGERS = {
   npm: {
     install: 'npm install --prefer-offline --no-audit --no-fund --loglevel=error',
@@ -19,7 +19,7 @@ export const PACKAGE_MANAGERS = {
     workspaces: false,
     run: (script) => `pnpm run --silent ${script}`,
     exec: (bin) => `pnpm exec ${bin}`,
-    verified: false,
+    verified: true,
   },
   yarn: {
     install: 'yarn install',

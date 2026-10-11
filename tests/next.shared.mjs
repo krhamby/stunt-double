@@ -25,7 +25,7 @@ export function nextSuite({ name, build }) {
       build: `${ENV} ${build}`,
       render: 'node probes/render.mjs',
     },
-    outputs: ['.next'],
+    outputs: ['.next', 'next-env.d.ts'],
     positive: {
       bundle: { files: '.next/static/chunks/**/*.js' },
       alsoPass: ['check'],

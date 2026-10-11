@@ -316,7 +316,7 @@ async function cmdDoctor(a) {
   // scripts of adapter-less tools must chain the check
   for (const [name, script] of Object.entries(pkg.scripts ?? {}))
     if (ADAPTERLESS.test(script) && !/stunt-double\s+check\s*&&/.test(script))
-      errors.push(`[DOCTOR] script "${name}" runs a tool without a stunt-double adapter and without the gate: "stunt-double check && ${script}"${p.tier === 'universal' ? '' : ' (that tool also needs the universal tier: npx stunt-double init --universal)'}${/(^|\s)(npx\s+)?esbuild\b/.test(script) ? `. Better: esbuild's CLI cannot load plugins, so build through its JS API with stuntDoubleEsbuild() from stunt-double/esbuild` : ''}`);
+      errors.push(`[DOCTOR] script "${name}" runs a tool without a stunt-double adapter and without the gate: "stunt-double check && ${script}"${p.tier === 'universal' ? '' : ' (that tool also needs the universal tier: npx stunt-double init --universal)'}${/(^|\s)(npx\s+)?esbuild\b/.test(script) ? `. Better: esbuild's CLI cannot load plugins, so build through its JS API with stuntDoubleEsbuild() from stunt-double/esbuild` : /(^|\s)bun\s+build\b/.test(script) ? `. Better: build through Bun.build() in a script, with stuntDoubleBun() from stunt-double/bun` : ''}`);
   // universal tier: package-manager link form
   if (p.sdk && p.link) {
     const want = LINK_FORM[p.pm];

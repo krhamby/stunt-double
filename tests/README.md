@@ -279,9 +279,9 @@ Import everything from `tests/harness/index.mjs`.
 | `commands.checkThenBuild` | | default `` `${check} && ${build}` `` |
 | `commands.<any>` | | referenced by `expectations` (`command: '<any>'`) or `positive.alsoPass` |
 | `family`, `toolConfig` | | enable and target family-specific mutations |
-| `pm` | | `npm` (default), `pnpm`, `yarn`, `bun` (only npm is exercised so far) |
+| `pm` | | `npm` (default), `pnpm` (exercised by `tests/vite-pnpm.test.mjs`), `yarn`, `bun` |
 | `positive` | | `{ render, bundle: { files, contains, absent }, alsoPass: [command names] }` |
-| `outputs` | | dirs the build may create (default `['dist']`) |
+| `outputs` | | dirs (or single generated files) the build may write (default `['dist']`) |
 | `generatedDir` | | where stunt-double may write (default `.stunt-double`) |
 | `unwired` | | `{ files, command }`: the tool without the adapter |
 | `expectations` | | per-mutation overrides, see above |

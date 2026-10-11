@@ -134,7 +134,8 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 | Remix, Astro 7 | the Vite plugin | designed |
 | Metro (React Native / Expo) | `withStuntDouble()` from `stunt-double/metro` | planned |
 | Parcel 2 | universal tier + optional `stunt-double/parcel` resolver | planned |
-| Bun 1.4 | `stuntDoubleBun()` from `stunt-double/bun`, or the universal tier | planned |
+| Bun 1.4 (bundler, `Bun.build()`) | `stuntDoubleBun()` from `stunt-double/bun` | **verified** ([page](docs/tools/bun.md)) |
+| Bun 1.4 (runtime, dev server) | universal tier | designed |
 | Farm, any other bundler | universal tier: package link + `stunt-double check && <build>` | works today |
 
 Status key:
@@ -144,7 +145,7 @@ Status key:
 - **designed** means the tool uses an existing adapter through its own config hook, as in [DESIGN.md §7](docs/DESIGN.md#7-per-tool-integration), not yet run in a suite.
 - **planned** means the adapter is designed but not written; importing it fails loudly, never silently.
 
-The type gate runs TypeScript 5.9 or 7, whichever the project installs. The examples use npm; the link forms for pnpm, Yarn 4 PnP and Bun are in [DESIGN.md §4.4](docs/DESIGN.md#44-wiring-written-by-stunt-double-init).
+The type gate runs TypeScript 5.9 or 7, whichever the project installs. **Package managers:** npm (every suite) and pnpm (`tests/vite-pnpm.test.mjs`, including the universal tier's `link:` form) are verified; the link forms for Yarn 4 PnP and Bun are in [DESIGN.md §4.4](docs/DESIGN.md#44-wiring).
 
 ## Repository layout
 
@@ -153,7 +154,7 @@ packages/stunt-double/                  the npm package: core, adapters (stunt-d
 examples/acme-core/                     fixture product SDK, @acme/core: renders its components through sockets
 examples/acme-core-slots-placeholder/   the registry placeholder, @acme/core-slots (fails on purpose when not wired)
 examples/customer-<tool>/               customer apps with the same overrides in src/overrides/: vite (+ Vitest),
-                                        esbuild, webpack (+ Jest), rspack, rsbuild, next, react-router,
+                                        esbuild, bun, webpack (+ Jest), rspack, rsbuild, next, react-router,
                                         storybook
 tests/                                  the core unit tests run from packages/; one toolchain suite per tool;
                                         the shared mistake catalogue in tests/mutations/
