@@ -73,6 +73,21 @@ bundlerSuite({
         assert.match(r.out, /stunt-double: post-bundle audit skipped, this host has no module-graph API/, ws.show(r));
       });
 
+      test('doctor: farm scripts pass when farm.config wires stuntDouble(); still flagged without it', () => {
+        const cli = (d) => run(process.execPath, [path.join(d, 'node_modules/stunt-double/bin/stunt-double.mjs'), 'doctor'], d);
+        const wired = ws.project('doctor-wired');
+        const r1 = cli(wired);
+        assert.equal(r1.code, 0, ws.show(r1));
+        assert.doesNotMatch(r1.out, /\[DOCTOR\] script/, ws.show(r1));
+        const unwired = ws.project('doctor-unwired', (d) => {
+          for (const f of ['farm.config.ts', 'farm.config.ssr.ts'])
+            fs.writeFileSync(path.join(d, f), fs.readFileSync(path.join(d, f), 'utf8').replace("import { stuntDouble } from 'stunt-double/vite';", '').replace('vitePlugins: [stuntDouble()],', ''));
+        });
+        const r2 = cli(unwired);
+        assert.notEqual(r2.code, 0, ws.show(r2));
+        assert.match(r2.out, /\[DOCTOR\] script "build" runs a tool without a stunt-double adapter/, ws.show(r2));
+      });
+
       test('farm start refuses to start on an injection error, with the [Fx] line', () => {
         const dir = ws.project('dev-typo', (d) => fs.copyFileSync(path.join(d, 'src/overrides/Button.tsx'), path.join(d, 'src/overrides/Buton.tsx')));
         const r = run('npx', ['farm', 'start', '--port', '9791'], dir, { timeout: 60_000 });

@@ -292,9 +292,16 @@ async function cmdDoctor(a) {
     if (!text.includes('stunt-double')) errors.push(`[DOCTOR] ${f} does not use ${t.adapter}: ${t.tool} would resolve the registry placeholder (or, in the universal tier, skip validation and the type gate). Add: ${t.hint}`);
     else notes.push(`${f}: adapter present`);
   }
-  // scripts of adapter-less tools must chain the check
+  // scripts of adapter-less tools must chain the check. Farm (stuntDouble() in farm.config vitePlugins) and Parcel
+  // (a stunt-double resolver in .parcelrc) are adapter tier when their own config wires it.
+  const wired = new Set();
+  for (const f of fs.readdirSync(p.root)) {
+    const tool = /^farm\.config\.(m|c)?[jt]s$/.test(f) ? 'farm' : f === '.parcelrc' ? 'parcel' : null;
+    if (tool && fs.readFileSync(path.join(p.root, f), 'utf8').includes('stunt-double')) wired.add(tool);
+  }
+  const adapterless = (script) => [...script.matchAll(new RegExp(ADAPTERLESS.source, 'g'))].some((m) => !wired.has(m[3].split(/\s+/)[0]));
   for (const [name, script] of Object.entries(pkg.scripts ?? {}))
-    if (ADAPTERLESS.test(script) && !/stunt-double\s+check\s*&&/.test(script))
+    if (adapterless(script) && !/stunt-double\s+check\s*&&/.test(script))
       errors.push(`[DOCTOR] script "${name}" runs a tool without a stunt-double adapter and without the gate: "stunt-double check && ${script}"${p.tier === 'universal' ? '' : ' (that tool also needs the universal tier: npx stunt-double init --universal)'}`);
   // universal tier: package-manager link form
   if (p.sdk && p.link) {
