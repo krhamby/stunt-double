@@ -1,7 +1,7 @@
 {
   "name": "@acme/core-slots",
   "version": "0.0.1",
-  "description": "Registry placeholder for the @acme/core slot package. Projects LINK their own generated package under this name (npx stunt-double init). If you see this package resolved, the tool or graph is not wired: it fails at resolve time on purpose.",
+  "description": "Registry placeholder for the @acme/core slot (socket) package. It is auto-installed as @acme/core's required peer and is never wired: stunt-double's adapter answers @acme/core-slots/* in configured tools, and the universal tier links the project's own package under this name. Any tool that resolves THIS package was not wired, and fails at resolve time on purpose.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

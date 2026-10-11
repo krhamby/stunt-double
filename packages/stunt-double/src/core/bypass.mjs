@@ -5,7 +5,7 @@ import path from 'node:path';
 import { parseModule } from './parse.mjs';
 import { listFiles, posix, globToRegExp, isInside } from './util.mjs';
 
-export function scanBypass({ root, sdk, cfg, overridesDir, genDir, checkFile, implFiles = [], rel }) {
+export function scanBypass({ root, sdk, cfg, overridesDir, outDir, implFiles = [], rel }) {
   const problems = [];
   const allow = (cfg.allowOriginalImports ?? []).map(globToRegExp);
   const impl = new Set(implFiles);
@@ -13,7 +13,7 @@ export function scanBypass({ root, sdk, cfg, overridesDir, genDir, checkFile, im
   for (const d of cfg.sourceDirs ?? ['src']) {
     const dir = path.resolve(root, d);
     for (const file of listFiles(dir)) {
-      if (isInside(file, overridesDir) || isInside(file, genDir) || file === checkFile || impl.has(file)) continue;
+      if (isInside(file, overridesDir) || (outDir && isInside(file, outDir)) || impl.has(file)) continue;
       const r = posix(path.relative(root, file));
       if (allow.some((re) => re.test(r))) continue;
       let src;
