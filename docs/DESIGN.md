@@ -267,7 +267,7 @@ stunt-double: 2 injection errors (@acme/core@1.0.0)
   [F8] "react" is bundled from 2 locations (node_modules/react, ../sdk/node_modules/react): dedupe it (resolve.dedupe / alias / single install).
   [F9] src/overrides/Button.tsx imports "server-only" but "Button" is a client slot (rendered inside "use client" SDK components).
   [STALE] .stunt-double/check.ts(31,1): error TS2578: Unused '@ts-expect-error' directive.   <- comment above it: src/overrides/Logo.* now exists; run `npx stunt-double gen`
-  [TS-PNP] TypeScript 7.0.2 cannot resolve modules under Yarn Plug'n'Play: set "typescript": "typescript5" (npm alias of typescript@5.9) in stunt-double.config.json.
+  [TS-PNP] TypeScript 7.0.2 cannot resolve modules under Yarn Plug'n'Play: make typescript@5.9 the project's "typescript" dev dependency (Yarn patches it for PnP; an npm alias such as "typescript5" is NOT patched and cannot resolve either).
 ```
 
 When a tool or graph was never wired, stunt-double's own code never runs; the tool's native resolver prints the placeholder's poison text. Strings are verbatim [S] (captured under the earlier working name; absolute paths shortened):
@@ -491,7 +491,7 @@ All keys are optional. Defaults are shown, except that `map` and `allowOriginalI
 - **`outDir`:** the one generated directory. The default is `.stunt-double`; in the universal tier it is the linked package's directory (e.g. `sdk-slots`). It must be a directory of its own: everything in it is generated and git-ignored. (`slotsDir` and `checkFile` of earlier layouts are `[CFG]` errors that point here.)
 - **`tsconfig`:** point it at the *app* tsconfig for solution-style setups. For example, Vite templates use `tsconfig.app.json`, because `tsconfig.json` only has `references`.
 - **`rsc`:** `auto` emits `"use client"` when `next`, `waku`, `@vitejs/plugin-rsc` or a `react-server-dom-*` package is a dependency.
-- **`typescript`:** a package name, so `"typescript5"` (an npm alias) can be the gate compiler.
+- **`typescript`:** a package name, so `"typescript5"` (an npm alias) can be the gate compiler. Not under Yarn PnP: Yarn patches only the package named `typescript` for PnP, so there the project's own `typescript` must be 5.9 (§6.4).
 - **`map`:** claims a slot from a file outside the convention directory (`from`), or under another export name (`export`, which may be `"default"`). `ignoresProps` is the explicit, reviewable opt-out from the "declares all props" check (§6.1).
 - **`relativeEdges`:** `"error"` (default) reports SDK-internal relative edges as F6; `"redirect"`, the degraded mode of §11, is not implemented yet (a `[CFG]` error).
 - **`sourceDirs`:** where the bypass scan (F6g) looks for app code importing `original/*`.
@@ -859,7 +859,7 @@ export function runTypeGate(p) {
 - **Exit codes:** TS 7 exits 1 and TS 5.9 exits 2; the gate treats any non-zero exit as failure [V].
 - **`baseUrl`:** removed in TS 7 (TS5102), so `paths` are written relative to the tsconfig [V].
 - **Paths and conditions:** `paths` inside `node_modules` `.d.ts` and `customConditions` behave the same in both versions [V].
-- **Yarn PnP:** TS 7.0.2 cannot resolve under PnP and fails closed [V]. The gate refuses up front with `[TS-PNP]` and accepts a TS 5.x alias package [U].
+- **Yarn PnP:** TS 7.0.2 cannot resolve under PnP and fails closed [V]. The gate refuses up front with `[TS-PNP]`. TS 5.9 works only as the project's own `typescript`: Yarn's built-in compat patch applies to that package name, not to an npm alias such as `typescript5` (unpatched, it cannot resolve `types` entries) [V `tests/vite-yarn-pnp.test.mjs`]. The gate's child process keeps Yarn's `--require .pnp.cjs`, or it cannot even read tsc from the zip cache [V].
 - **Dot-directories:** generated files are never put in a dot-directory, because `**/*` include globs skip them [V].
 
 ### 6.5 What tsc and the IDE see

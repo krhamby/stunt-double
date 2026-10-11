@@ -145,7 +145,7 @@ Status key:
 - **designed** means the tool uses an existing adapter through its own config hook, as in [DESIGN.md §7](docs/DESIGN.md#7-per-tool-integration), not yet run in a suite.
 - **planned** means the adapter is designed but not written; importing it fails loudly, never silently.
 
-The type gate runs TypeScript 5.9 or 7, whichever the project installs. **Package managers:** npm (every suite) and pnpm (`tests/vite-pnpm.test.mjs`, including the universal tier's `link:` form) are verified; the link forms for Yarn 4 PnP and Bun are in [DESIGN.md §4.4](docs/DESIGN.md#44-wiring).
+The type gate runs TypeScript 5.9 or 7, whichever the project installs. **Package managers:** npm (every suite), pnpm 10 and Yarn 4 Plug'n'Play are verified, each including its universal-tier link form; see [docs/package-managers.md](docs/package-managers.md).
 
 ## Repository layout
 
@@ -177,7 +177,7 @@ To run one part, name it: `npm test -- core` for the core unit tests, `npm test 
 - [docs/DECISIONS.md](docs/DECISIONS.md) is the decision record: the designs that competed, why this one won, what was grafted or rejected, and the open questions.
 - [docs/errors.md](docs/errors.md) explains every `[Fx]` code; each report links to its section.
 - [docs/sdk-authors.md](docs/sdk-authors.md) is for the team that publishes the SDK: what to change once, and the `sdk-lint` publish gate.
-- [docs/tools/](docs/tools) has one page per tool; [docs/limitations.md](docs/limitations.md) lists what can still reach runtime.
+- [docs/tools/](docs/tools) has one page per tool, [docs/package-managers.md](docs/package-managers.md) covers npm, pnpm and Yarn PnP, and [docs/limitations.md](docs/limitations.md) lists what can still reach runtime.
 
 ## License
 

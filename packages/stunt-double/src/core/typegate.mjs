@@ -45,6 +45,18 @@ export function writeCheckTsconfig(p) {
 const memo = new Map();
 
 /**
+ * NODE_OPTIONS of the tsc child. The parent's are dropped (a test runner's or a loader's hooks must not leak into
+ * tsc), except Yarn Plug'n'Play's runtime: without it the child cannot even read tsc from Yarn's zip cache.
+ */
+function childNodeOptions(root) {
+  for (let d = root; ; d = path.dirname(d)) {
+    const pnp = path.join(d, '.pnp.cjs');
+    if (fs.existsSync(pnp)) return `--require ${JSON.stringify(pnp)}`;
+    if (path.dirname(d) === d) return '';
+  }
+}
+
+/**
  * @returns {Promise<{ ok: boolean, ms?: number, version?: string, message?: string, lines?: string[], output?: string }>}
  */
 export function runTypeGate(p, { force = false } = {}) {
@@ -52,7 +64,7 @@ export function runTypeGate(p, { force = false } = {}) {
   const ts = resolveTypeScript(p);
   if (ts.error) return Promise.resolve({ ok: false, message: formatReport(header(p, 1), [ts.error]), lines: [ts.error] });
   if (p.isPnP && ts.major >= 7) {
-    const line = `[TS-PNP] TypeScript ${ts.version} cannot resolve modules under Yarn Plug'n'Play: set "typescript": "typescript5" (npm alias of typescript@5.9) in stunt-double.config.json.`;
+    const line = `[TS-PNP] TypeScript ${ts.version} cannot resolve modules under Yarn Plug'n'Play: make typescript@5.9 the project's "typescript" dev dependency (Yarn patches it for PnP; an npm alias such as "typescript5" is NOT patched and cannot resolve either).`;
     return Promise.resolve({ ok: false, message: formatReport(header(p, 1), [line]), lines: [line] });
   }
   const checkText = (() => { try { return fs.readFileSync(p.checkFile, 'utf8'); } catch { return ''; } })();
@@ -66,7 +78,7 @@ export function runTypeGate(p, { force = false } = {}) {
   const tsconfigFile = writeCheckTsconfig(p);
   const run = new Promise((done) => {
     const t0 = performance.now();
-    execFile(process.execPath, [ts.bin, '-p', tsconfigFile, '--pretty', 'false'], { cwd: p.root, maxBuffer: 1 << 26, env: { ...process.env, NODE_OPTIONS: '' } }, (err, stdout, stderr) => {
+    execFile(process.execPath, [ts.bin, '-p', tsconfigFile, '--pretty', 'false'], { cwd: p.root, maxBuffer: 1 << 26, env: { ...process.env, NODE_OPTIONS: childNodeOptions(p.root) } }, (err, stdout, stderr) => {
       const ms = Math.round(performance.now() - t0);
       const output = `${stdout ?? ''}${stderr ?? ''}`;
       if (!err) return done({ ok: true, ms, version: ts.version, output });

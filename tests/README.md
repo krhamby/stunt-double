@@ -279,7 +279,7 @@ Import everything from `tests/harness/index.mjs`.
 | `commands.checkThenBuild` | | default `` `${check} && ${build}` `` |
 | `commands.<any>` | | referenced by `expectations` (`command: '<any>'`) or `positive.alsoPass` |
 | `family`, `toolConfig` | | enable and target family-specific mutations |
-| `pm` | | `npm` (default), `pnpm` (exercised by `tests/vite-pnpm.test.mjs`), `yarn`, `bun` |
+| `pm` | | `npm` (default), `pnpm` (`tests/vite-pnpm.test.mjs`), `yarn` (Yarn 4 through Corepack; Plug'n'Play in `tests/vite-yarn-pnp.test.mjs`), `bun`. Each keeps its install state across resets (`installState` in `tests/harness/pm.mjs`: `node_modules`, or `.pnp.cjs`, `.yarn/` and `yarn.lock`); run tools through the package manager where there is no `node_modules/.bin` (`fx.pm.exec('stunt-double')`) |
 | `positive` | | `{ render, bundle: { files, contains, absent }, alsoPass: [command names] }` |
 | `outputs` | | dirs (or single generated files) the build may write (default `['dist']`) |
 | `generatedDir` | | where stunt-double may write (default `.stunt-double`) |

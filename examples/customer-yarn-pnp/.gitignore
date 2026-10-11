@@ -1,0 +1,5 @@
+# Yarn 4 install state (the fixture installs from local tarballs: no lockfile)
+.yarn/
+.pnp.cjs
+.pnp.loader.mjs
+yarn.lock

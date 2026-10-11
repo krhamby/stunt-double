@@ -169,7 +169,7 @@ stunt-double cannot read the SDK's `slot-manifest.json`, the manifest needs a ne
 
 ## TS-PNP — TypeScript 7 under Yarn PnP
 
-TypeScript 7.0 cannot resolve modules under Yarn Plug'n'Play. Set `"typescript": "typescript5"` in `stunt-double.config.json` and install `typescript5@npm:typescript@5.9` as a dev dependency.
+TypeScript 7.0 cannot resolve modules under Yarn Plug'n'Play. Make `typescript@5.9` the project's own `typescript` dev dependency: Yarn patches that package for PnP. An npm alias such as `typescript5@npm:typescript@5.9` is not patched, so it cannot resolve modules under PnP either.
 
 ## X1 — ignoreBuildErrors in Next.js
 

@@ -31,8 +31,8 @@ Two things are **never** possible in any setup: every override disappearing at o
 
 ## Not yet covered by an adapter
 
-Metro (React Native / Expo), Parcel, Bun, Farm, Storybook, Astro and React Router have designs ([DESIGN.md §7](DESIGN.md#7-per-tool-integration)) but no adapter yet. Use the universal tier (`npx stunt-double init --universal`, then `stunt-double check && <tool>`); see R1.
+Metro (React Native / Expo), Parcel, Farm and Astro have designs ([DESIGN.md §7](DESIGN.md#7-per-tool-integration)) but no adapter or suite yet, and neither have Bun's runtime and dev server (its bundler is covered). Use the universal tier there (`npx stunt-double init --universal`, then `stunt-double check && <tool>`); see R1.
 
 ## Untested
 
-Windows (junctions, recursive `fs.watch`, case-insensitive file names), Yarn PnP and pnpm in the toolchain suites (designed, exercised only in earlier prototypes), several SDKs with slots in one app, and `kind: "server"` slots. See the open questions in [DECISIONS.md](DECISIONS.md#open-questions).
+Windows (junctions, recursive `fs.watch`, case-insensitive file names), Bun as a package manager, several SDKs with slots in one app, and `kind: "server"` slots. See the open questions in [DECISIONS.md](DECISIONS.md#open-questions).

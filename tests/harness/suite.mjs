@@ -215,6 +215,7 @@ function assertSimplicityBar(fx, suite) {
   const problems = [];
   for (const f of listTree(fx.app)) {
     if (allowed.some((a) => f.startsWith(a)) || suite.outputs.includes(f)) continue; // an output dir, or a generated file
+    if (fx.pm.installState.some((x) => f === x || f.startsWith(`${x}/`))) continue; // the package manager's install (e.g. Yarn PnP)
     if (!pristine.has(f)) problems.push(`created ${f}`);
     else if (fs.readFileSync(path.join(fx.app, f), 'utf8') !== fs.readFileSync(path.join(fx.pristine, f), 'utf8')) problems.push(`modified ${f}`);
   }
@@ -297,10 +298,12 @@ function defineUniversal(suite, mainFx, results) {
       transform(new FileOps(mainFx.app)); // the edits of the universal tier, without reinstalling
       const c = await step(mainFx, record, t, suite.commands.check);
       assertFailed(c, 'stunt-double check: ');
-      assertMessages(c, [/\[F6\][^\n]*placeholder/]);
+      // npm / pnpm install the registry placeholder for the missing peer; Yarn installs no peers, so the SDK
+      // cannot resolve the slot package at all. Both are the wiring self-test's [F6].
+      assertMessages(c, [/\[F6\][^\n]*(placeholder|cannot resolve @acme\/core-slots)/]);
       const b = await step(mainFx, record, t, u.bare);
       assertFailed(b, 'bare build: ');
-      assertMessages(b, [/STUNT-DOUBLE-NOT-WIRED/]);
+      assertMessages(b, [/STUNT-DOUBLE-NOT-WIRED|tried to access @acme\/core-slots \(a peer dependency\)/]);
       record.status = 'ok';
     });
 
@@ -310,7 +313,7 @@ function defineUniversal(suite, mainFx, results) {
       await fx.reset();
       await fx.useSdk();
       fx.remove(fx.override('PriceTag.tsx'));
-      const g = await step(fx, record, t, 'stunt-double gen');
+      const g = await step(fx, record, t, `${fx.pm.exec('stunt-double')} gen`);
       assertPassed(g, 'stunt-double gen: ');
       fx.write(fx.override('PriceTg.tsx'), fx.pristineText(fx.override('PriceTag.tsx')));
       const bare = await step(fx, record, t, u.bare);
