@@ -28,7 +28,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run setup
-      - name: Install Chromium (Vitest browser mode, Storybook render checks)
-        if: matrix.suite == 'vitest' || matrix.suite == 'storybook'
+      - name: Install Chromium for Vitest browser mode
+        if: matrix.suite == 'vitest'
         run: npx -y playwright@1.64.0 install --with-deps chromium
+      - name: Install the Storybook examples and their Chromium
+        if: matrix.suite == 'storybook'
+        run: |
+          (cd examples/customer-storybook-vite && npm install --no-package-lock --no-audit --no-fund)
+          (cd examples/customer-storybook-webpack && npm install --no-package-lock --no-audit --no-fund)
+          (cd examples/customer-storybook-vite && npx playwright-core install --with-deps chromium)
       - run: node --test --test-reporter=spec tests/${{ matrix.suite }}.test.mjs
