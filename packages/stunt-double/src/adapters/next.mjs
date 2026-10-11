@@ -16,12 +16,12 @@
 //   webpack       exact-match aliases to the shims, exportsPresence 'error' (F5), the fingerprint folded into the
 //                 persistent cache version, and a plugin reporting STA problems + the post-bundle audit (AUD)
 //                 through compilation.errors (the type gate runs in runAfterProductionCompile for both bundlers).
+import fs from 'node:fs';
 import path from 'node:path';
 import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, webpackGraph } from '../core/audit.mjs';
 import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
-import { watchProject } from '../core/watch.mjs';
 import { DEFAULTS } from '../core/config.mjs';
 
 const NAME = 'stunt-double';
@@ -116,25 +116,75 @@ function wrapUnsafe(nextConfig, opts, dev) {
   };
 }
 
-// next dev: Turbopack has no plugin hooks, so the adapter watches the overrides itself (the same watcher as
-// `stunt-double watch`): add / remove / swap rewrite shim content, which Turbopack and webpack pick up; mistakes
-// poison the shims (Next's overlay + HTTP 500 carry the [Fx] text). One watcher per project and process; it never
-// keeps the process alive. Contract errors (next dev does not type-check) are printed to the terminal.
+// next dev: Turbopack has no plugin hooks, so the adapter watches the overrides itself: add / remove / swap
+// rewrite shim content, which Turbopack and webpack pick up; mistakes poison the shims (Next's overlay and HTTP 500
+// carry the [Fx] text); contract errors (next dev does not type-check) are printed to the terminal. One watcher per
+// project and process; it never keeps the process alive. (Not core watchProject: see watchDirs below.)
 const watchers = new Map();
 function startDevWatcher(p, typecheck) {
   if (watchers.has(p.root)) return;
-  const gate = (cur) => {
-    if (typecheck === false) return;
-    runTypeGate(cur).then((r) => { if (!r.ok) console.error(r.message); }, () => {});
+  watchers.set(p.root, true);
+  let cur = p;
+  let lastProblems = '';
+  let lastGate = '';
+  const gate = () => {
+    if (typecheck === false || cur.problems.length) return;
+    // force: the gate is memoized per decision fingerprint, and an edit INSIDE an override changes no decision
+    runTypeGate(cur, { force: true }).then((r) => {
+      const msg = r.ok ? '' : r.message;
+      if (msg && msg !== lastGate) console.error(msg);
+      else if (!msg && lastGate) console.error(`${NAME}: slot contracts OK again`);
+      lastGate = msg;
+    }, () => {});
   };
-  watchers.set(p.root, watchProject(p, {
-    onChange: (next, _prev, e) => {
-      if (e) return console.error(`${NAME}: ${e.message}`);
-      if (next.problems.length) console.error(formatProblems(next));
-      else gate(next);
-    },
-  }));
-  gate(p);
+  let t;
+  const kick = () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      try { cur = regenerate(cur, { onError: 'poison' }); } catch (e) { return console.error(`${NAME}: ${e?.message ?? e}`); }
+      const probs = cur.problems.join('\n');
+      if (probs && probs !== lastProblems) console.error(formatProblems(cur));
+      else if (!probs && lastProblems) console.error(`${NAME}: injection errors fixed`);
+      lastProblems = probs;
+      gate();
+    }, 100);
+    t.unref?.();
+  };
+  watchDirs(p.overridesDir, kick);
+  const extra = new Set([path.dirname(p.configFile ?? path.join(p.root, 'x')), p.root, ...[...p.closureFiles].map((f) => path.dirname(f))]);
+  for (const d of extra) if (!d.startsWith(p.overridesDir)) watchDirs(d, kick, { recurse: false, only: (f) => cur.watches(f) });
+  gate();
+}
+
+// One NON-recursive watcher per directory: Node 22's recursive fs.watch on Linux stops reporting a file once an
+// editor saves it atomically (write a temp file, rename it over the original); a directory watcher does not.
+function watchDirs(root, onEvent, { recurse = true, only = null } = {}) {
+  const live = new Map();
+  const scan = () => {
+    const dirs = new Set();
+    const walk = (d) => {
+      dirs.add(d);
+      let ents = [];
+      try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch {}
+      if (recurse) for (const e of ents) if (e.isDirectory() && e.name !== 'node_modules' && !e.name.startsWith('.')) walk(path.join(d, e.name));
+    };
+    walk(root);
+    for (const [d, fw] of live) if (!dirs.has(d)) { fw.close(); live.delete(d); }
+    for (const d of dirs) {
+      if (live.has(d)) continue;
+      try {
+        const fw = fs.watch(d, (ev, name) => {
+          if (only && !(name && only(path.join(d, String(name))))) return;
+          if (ev === 'rename' && recurse) scan();
+          onEvent();
+        });
+        fw.on('error', () => {});
+        fw.unref?.();
+        live.set(d, fw);
+      } catch {}
+    }
+  };
+  scan();
 }
 
 // The piece of stunt-double/webpack that Next needs (no type gate: next build type-checks the check file).

@@ -106,16 +106,16 @@ before(() => {
     assert.ok(fs.existsSync(path.join(PACKS, t)), `missing .packs/${t}: run npm run setup`);
   fs.mkdirSync(BASE);
   for (const f of fs.readdirSync(APP_SRC)) {
-    if (['node_modules', '.next', 'package-lock.json', 'next-env.d.ts'].includes(f)) continue;
-    fs.cpSync(path.join(APP_SRC, f), path.join(BASE, f), { recursive: true, filter: (s) => !/[\\/]sdk-slots[\\/]gen([\\/]|$)|stunt-double\.check\.ts$/.test(s) });
+    if (['node_modules', '.next', '.stunt-double', 'package-lock.json', 'next-env.d.ts'].includes(f)) continue;
+    fs.cpSync(path.join(APP_SRC, f), path.join(BASE, f), { recursive: true });
   }
   // file: specs relative to the example dir -> absolute (the copy lives elsewhere)
   const pkg = JSON.parse(fs.readFileSync(path.join(BASE, 'package.json'), 'utf8'));
-  for (const deps of [pkg.dependencies, pkg.devDependencies])
+  for (const deps of [pkg.dependencies, pkg.devDependencies, pkg.overrides])
     for (const [k, v] of Object.entries(deps ?? {})) if (v.startsWith('file:../')) deps[k] = 'file:' + path.resolve(APP_SRC, v.slice(5));
   fs.writeFileSync(path.join(BASE, 'package.json'), JSON.stringify(pkg, null, 2));
   execFileSync('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: BASE, env: ENV, stdio: ['ignore', 'pipe', 'inherit'], timeout: 600_000 });
-  assert.ok(fs.existsSync(path.join(BASE, 'sdk-slots/gen/Button.jsx')), 'postinstall should have generated the shims');
+  // the 3-step setup: nothing is generated until the first next build / next dev
 });
 
 after(() => { if (!KEEP) fs.rmSync(TMP, { recursive: true, force: true }); else console.log('kept', TMP); });
@@ -243,7 +243,7 @@ const MUTATIONS = [
       "c.webpack = (conf, ctx) => { const x = wp(conf, ctx); x.resolve.alias['@acme/core-slots/PriceTag$'] = path.resolve('node_modules/@acme/core/dist/original/PriceTag.js'); return x; };",
       'export default c;', ''].join('\n')),
     expect: {
-      webpack: { stage: /Failed to compile/, text: /\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but sdk-slots\/gen\/PriceTag\.jsx is not in the bundle/ },
+      webpack: { stage: /Failed to compile/, text: /\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but \.stunt-double\/gen\/PriceTag\.jsx is not in the bundle/ },
       // the mutation is webpack-only config; Turbopack is unaffected and stays correct
       turbopack: { ok: true, html: { sdk: { BRAND_PRICE: 3, SDK_DEFAULT_PRICETAG: 0 } } },
     },
@@ -255,7 +255,7 @@ const MUTATIONS = [
   },
   {
     id: 'F9a', what: 'the shims\' "use client" switched off ("rsc": false): hook-using override in a Server Component tree',
-    apply: (a) => a.write('stunt-double.config.json', JSON.stringify({ sdk: '@acme/core', rsc: false })),
+    apply: (a) => a.write('stunt-double.config.json', JSON.stringify({ rsc: false })),
     expect: { stage: /Error occurred prerendering page "\/"/, text: /Attempted to call useTheme\(\) from the server/ },
   },
   {
@@ -285,12 +285,9 @@ const MUTATIONS = [
     expect: { stage: TYPE_GATE, text: /\[F1\] PriceTag \(src\/overrides\/PriceTag\.tsx\): override ignores these SDK props: "currency"/ },
   },
   {
-    id: 'X2+F9c', what: 'the app tsconfig does not include the check file: the gate still runs',
-    apply: (a) => {
-      a.write('tsconfig.json', a.read('tsconfig.json').replace('"src/**/*.ts", ', '').replace(/,\s*"files": \[[^\]]*\]/, ''));
-      a.write('src/overrides/Logo.tsx', "import type { SlotProps } from '@acme/core/contracts';\nexport async function Logo({ size = 32 }: SlotProps['Logo']) { await Promise.resolve(); return <svg data-sd=\"BRAND_LOGO\" width={size} />; }\n");
-    },
-    expect: { stage: TYPE_GATE, text: /\[F9\] Logo \(src\/overrides\/Logo\.tsx\): client slot override must not be an async component/ },
+    id: 'CFG-option', what: 'withStuntDouble() with a misspelled option',
+    apply: (a) => a.edit('next.config.mjs', 'withStuntDouble(nextConfig)', 'withStuntDouble(nextConfig, { typeCheck: false })'),
+    expect: { stage: CONFIG_LOAD, text: /\[CFG\] unknown withStuntDouble\(\) option "typeCheck"/ },
   },
   {
     id: 'TS7-api', what: 'TypeScript 7 with experimental.useTypeScriptCli: false',
@@ -377,7 +374,7 @@ describe('next dev', () => {
     assert.match(r.stdout + r.stderr, /\[F2\] src\/overrides\/Buton\.tsx overrides unknown slot/);
   });
 
-  for (const [bundler, watch] of [['turbopack', true], ['webpack', true], ['webpack', false]]) {
+  for (const [bundler, watch] of [['turbopack', false], ['webpack', false], ['turbopack', true]]) {
     test(`${watch ? 'stunt-double watch -- ' : ''}next dev${bundler === 'webpack' ? ' --webpack' : ''}: add / remove / swap live; typo -> HTTP 500 with the poison text, cleared on fix`, async () => {
       const app = copyApp(`dev-${bundler}-${watch}`);
       const port = freePort();
@@ -415,12 +412,44 @@ describe('next dev', () => {
     });
   }
 
+  test('next dev: editor-style atomic saves (write temp + rename) are seen: F7 -> HTTP 500, F1 -> terminal, both recover', async () => {
+    // Node 22's recursive fs.watch on Linux loses a file once it is renamed over; the adapter watches directories.
+    const app = copyApp('dev-atomic');
+    const port = freePort();
+    const srv = startProc(app.dir, [app.file('node_modules/next/dist/bin/next'), 'dev', '-p', String(port)]);
+    const B = 'src/overrides/PriceTag.tsx';
+    const atomic = (text) => { app.write(B + '.tmp', text); fs.renameSync(app.file(B + '.tmp'), app.file(B)); };
+    const orig = app.read(B);
+    const step = async (label, pred, ms) => {
+      const r = await until(port, '/', pred, ms);
+      assert.ok(!r.timedOut, `${label}: HTTP ${r.status} ${markersOf(r.text).join(' ')}\n--- log ---\n${srv.log.slice(-3000)}`);
+    };
+    const logHas = async (label, re, ms = 20_000) => {
+      const t = Date.now();
+      while (!re.test(srv.log) && Date.now() - t < ms) await new Promise((r) => setTimeout(r, 150));
+      assert.match(srv.log, re, label);
+    };
+    try {
+      await step('cold start', has('BRAND_PRICE'), 120_000);
+      atomic(orig + '\n// touched\n');
+      await step('no-op atomic save', has('BRAND_PRICE'));
+      atomic("import { PriceTag as P } from '@acme/core';\nimport type { SlotProps } from '@acme/core/contracts';\nexport function PriceTag(props: SlotProps['PriceTag']) { return <P {...props} />; }\n");
+      await step('F7 by atomic save -> HTTP 500 with the poison text', (r) => r.status === 500 && /STUNT-DOUBLE-ERROR -- \[F7\]/.test(r.text));
+      atomic(orig);
+      await step('fixed by atomic save', has('BRAND_PRICE'));
+      atomic(orig.replace("{ amount, currency = 'USD' }: SlotProps['PriceTag']", '{ amount }: { amount: number }'));
+      await logHas('F1 by atomic save -> printed in the terminal', /\[F1\] PriceTag \(src\/overrides\/PriceTag\.tsx\): override ignores these SDK props: "currency"/);
+      atomic(orig);
+      await logHas('F1 fixed -> reported', /stunt-double: slot contracts OK again/);
+    } finally { await srv.stop(); }
+  });
+
   test('known gap (Next 16.4 Turbopack dev): an error a Pages Router route saw sticks to App Router routes until that route is requested again', async () => {
     // Not specific to stunt-double: any compile error in a module shared by both routers does this. If this test
     // starts failing, Next fixed it: delete the test and the "Known gaps" entry in docs/tools/next.md.
     const app = copyApp('dev-turbopack-gap');
     const port = freePort();
-    const srv = startProc(app.dir, [app.file('node_modules/stunt-double/bin/stunt-double.mjs'), 'watch', '--', process.execPath, app.file('node_modules/next/dist/bin/next'), 'dev', '-p', String(port)]);
+    const srv = startProc(app.dir, [app.file('node_modules/next/dist/bin/next'), 'dev', '-p', String(port)]);
     try {
       assert.ok(!(await until(port, '/', has('BRAND_PRICE'), 120_000)).timedOut, srv.log);
       app.write('src/overrides/Buton.tsx', 'export function Buton() { return null; }\n');
@@ -440,14 +469,14 @@ describe('next start', () => {
     const app = copyApp('start');
     assert.equal(build(app, 'turbopack').code, 0);
     app.write('src/overrides/Buton.tsx', 'export function Buton() { return null; }\n');
-    const shim = app.read('sdk-slots/gen/Button.jsx');
+    const shim = app.read('.stunt-double/gen/Button.jsx');
     const port = freePort();
     const srv = startProc(app.dir, [app.file('node_modules/next/dist/bin/next'), 'start', '-p', String(port)]);
     try {
       const r = await until(port, '/', (x) => x.status === 200, 30_000);
       assert.ok(!r.timedOut, srv.log);
       assert.deepEqual(compareRender(summarize(r.text), SSR_EXPECT['/']), []);
-      assert.equal(app.read('sdk-slots/gen/Button.jsx'), shim);
+      assert.equal(app.read('.stunt-double/gen/Button.jsx'), shim);
     } finally { await srv.stop(); }
   });
 });
