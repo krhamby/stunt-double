@@ -53,6 +53,7 @@ webpack 5.111.1, webpack-cli 7.2.3, webpack-dev-server 6.0.0, swc-loader 0.2.7 w
 | F5 | Wrong export (default instead of named) | build | overlay ✓ |
 | F6a | The installed SDK imports its own default directly | build (scan of the installed SDK) | overlay |
 | F6b | A config that was never wrapped | build: `Module not found: … './STUNT-DOUBLE-NOT-WIRED -- …'` | same text, in the overlay |
+| F6c | Server build (`target: 'node'`) externalizes the SDK, e.g. with `webpack-node-externals` | handled: the wrapper keeps `@acme/core` and its sockets bundled for function externals ✓; a string or RegExp external that captures them fails the build with `[F6] "@acme/core" is external in this node build` ✓ | same |
 | F6e | Persistent cache after adding or removing an override | correct output with a warm filesystem cache ✓ | correct |
 | F6g | App code imports `@acme/core/original/X` | build | overlay |
 | F6h | Override added or removed without regenerating | regenerated automatically; correct output ✓ | regenerated in the same rebuild ✓ |
@@ -73,5 +74,6 @@ Nothing in this table reaches runtime when the wrapper is in the config.
 ## Known gaps
 
 - `exportsPresence: 'error'` is global. If a dependency relies on importing names that don't exist (rare, usually type-only re-exports compiled by a non-type-aware tool), the build fails where webpack used to warn. Fix the import, or set `module.parser.javascript.exportsPresence` back to `'warn'` for that dependency with a `module.rules[].parser` override (F5 is then still caught by the type check and the generator).
+- Server builds: externals run before aliases, so an externalized SDK would be loaded by Node without your overrides. The wrapper wraps *function* externals (what `webpack-node-externals` returns) so `@acme/core`, brand layers and `@acme/core-slots/*` stay bundled. It can't rewrite string, RegExp or object externals; those fail the build with `[F6]` and the allowlist to add.
 - In a multi-compiler build (for example client + SSR) each compiler reports the same problem, so you see each message twice.
 - Wrapping with `withStuntDouble()` is the only supported integration. A config without it is caught (F6b), but only as a resolution error.

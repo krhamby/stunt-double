@@ -5,19 +5,15 @@
   "description": "A project that injects its own components into @acme/core with stunt-double (Vite 8 + Vitest 5).",
   "type": "module",
   "scripts": {
-    "postinstall": "stunt-double gen --no-fail",
     "dev": "vite",
     "build": "vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "check": "stunt-double check",
-    "probe": "node probes/render.mjs",
-    "probe:dev": "node probes/dev.mjs"
+    "probe": "node probes/render.mjs"
   },
   "dependencies": {
     "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
-    "@acme/core-slots": "file:./sdk-slots",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -29,5 +25,8 @@
     "typescript": "7.0.2",
     "vite": "8.3.4",
     "vitest": "5.0.3"
+  },
+  "overrides": {
+    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz"
   }
 }

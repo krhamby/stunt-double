@@ -105,11 +105,12 @@ export function defineSuite(t) {
     // Install the example exactly like a user would, from the .packs/ tarballs (no lockfile: the tarballs'
     // integrity changes whenever `npm run setup` re-packs them).
     execFileSync('cp', ['-a', example, base]);
-    for (const x of ['node_modules', 'dist', 'dist-ssr', 'package-lock.json', 'sdk-slots/gen', 'src/stunt-double.check.ts', '.stunt-double'])
+    for (const x of ['node_modules', 'dist', 'dist-ssr', 'build', '.stunt-double'])
       fs.rmSync(path.join(base, x), { recursive: true, force: true });
     // The copy lives outside the repo: point the relative file: specs at the repo's .packs/ tarballs.
     const pj = JSON.parse(read(base, 'package.json'));
-    for (const k of ['dependencies', 'devDependencies']) for (const [n, v] of Object.entries(pj[k] ?? {}))
+    // (overrides: the registry placeholder that the SDK's required peer resolves to; not a user step.)
+    for (const k of ['dependencies', 'devDependencies', 'overrides']) for (const [n, v] of Object.entries(pj[k] ?? {}))
       if (/^file:(\.\.\/)+\.packs\//.test(v)) pj[k][n] = `file:${path.join(packs, v.replace(/^file:(\.\.\/)+\.packs\//, ''))}`;
     write(base, 'package.json', JSON.stringify(pj, null, 2) + '\n');
     npmInstall(base);
@@ -139,8 +140,9 @@ export function defineSuite(t) {
   if (t.replace?.F6b) t.replace.F6b(h);
   else test(`${t.tool}: F6b a config without the adapter fails on the registry placeholder`, () => {
     const d = fresh();
-    fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
-    npmInstall(d, '--no-save', path.join(packs, 'acme-core-slots-0.0.1.tgz'));
+    // The SDK's required peer @acme/core-slots is the registry placeholder (as for every user); only the
+    // adapter line is removed.
+    assert.ok(fs.existsSync(path.join(d, 'node_modules/@acme/core-slots/not-wired.js')), 'the registry placeholder must be installed');
     write(d, t.configFile, read(d, t.configFile).replace("import { withStuntDouble } from 'stunt-double/webpack';", 'const withStuntDouble = (config) => config; // not wired'));
     assertFails(build(d), /Module not found[^\n]*STUNT-DOUBLE-NOT-WIRED/);
   });
@@ -152,6 +154,29 @@ export function defineSuite(t) {
     write(d, 'audit.config.mjs', `import * as tool from '${t.packageName}';\nimport base from './${t.configFile}';\nconst lib = tool.rspack ?? tool.default;\nexport default (env, argv) => base(env, argv).map((c) => { c.plugins.unshift(new lib.NormalModuleReplacementPlugin(/^@acme\\/core-slots\\/PriceTag$/, '@acme/core/original/PriceTag')); return c; });\n`);
     const r = spawnSync('npx', [...t.build, '-c', 'audit.config.mjs'], { cwd: d, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
     assertFails({ status: r.status, out: `${r.stdout}${r.stderr}` }, /\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but [^\n]*PriceTag\.jsx is not in the bundle/);
+  });
+
+  // Server targets: externals run before resolve.alias. webpack-node-externals would hand @acme/core to Node
+  // (build exit 0, then a runtime crash on the .jsx shim): the adapter keeps the SDK bundled.
+  const serverExternals = (d, externals) => {
+    npmInstall(d, '--no-save', 'webpack-node-externals@3.0.0');
+    const cfg = read(d, t.configFile)
+      .replace("import { withStuntDouble }", "import nodeExternals from 'webpack-node-externals';\nimport { withStuntDouble }")
+      .replace("    target: 'node',\n", `    target: 'node',\n    externalsPresets: { node: true },\n    externals: ${externals},\n`);
+    assert.match(cfg, /externalsPresets/, 'the SSR config must declare target: node');
+    write(d, t.configFile, cfg);
+  };
+  test(`${t.tool}: F6c server target with webpack-node-externals: SDK and sockets stay bundled`, () => {
+    const d = fresh();
+    serverExternals(d, "[nodeExternals({ importType: 'module' })]");
+    const r = build(d);
+    assertRenders(d, r);
+    assert.doesNotMatch(read(d, 'dist-ssr/entry-server.mjs'), /from\s*"@acme\/core/, '@acme/core must be bundled into the SSR output');
+  });
+  test(`${t.tool}: F6c a RegExp external capturing the SDK fails the build`, () => {
+    const d = fresh();
+    serverExternals(d, '[/^@acme\\/core/]');
+    assertFails(build(d), /\[F6\] "@acme\/core" is external in this node build/);
   });
 
   test(`${t.tool}: F6e warm persistent cache never serves an old decision`, () => {

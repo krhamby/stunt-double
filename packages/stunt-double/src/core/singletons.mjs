@@ -5,7 +5,8 @@ import path from 'node:path';
 import { real, findPackageJson } from './util.mjs';
 
 export function checkSingletons({ root, sdk, slotsDir, layers = [], overrideDirs = [], singletons = ['react', 'react-dom'], rel }) {
-  const vantage = { app: root, [sdk.name]: sdk.realDir, slots: slotsDir };
+  const vantage = { app: root, [sdk.name]: sdk.realDir };
+  if (slotsDir) vantage.slots = slotsDir; // the linked slot package (universal tier)
   for (const l of layers) vantage[l.name] = l.realDir;
   overrideDirs.forEach((d, i) => { vantage[i ? `overrides#${i}` : 'overrides'] = d; });
   const problems = [];

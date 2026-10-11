@@ -1,5 +1,7 @@
-// Render src/stunt-double.check.ts: the contract assertions that live in the project's own tsc program
-// (tsc, next build, CRA, the IDE) and in the type gate. Shape verified in TS 7.0.2 and 5.9.3, strict on/off:
+// Render <outDir>/check.ts: the contract assertions the type gate runs (and, opted in with `init --editor`, the
+// project's own tsc program and IDE). It imports only relative files (the overrides and the generated shims'
+// .d.ts), so it compiles in the gate AND in the app program without any tsconfig "paths": the SDK's published
+// types never mention the socket package. Shape verified in TS 7.0.2 and 5.9.3, strict on/off:
 // passes React.FC / memo / forwardRef / class / children-returning overrides; fails extra-required props,
 // narrowed unions, ignored props, wrong ref element, non-components and async client components.
 import path from 'node:path';
@@ -11,7 +13,7 @@ const q = (s) => `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 /**
  * @returns {{ text: string, map: { file: string, lines: Record<number, {role, slot?, file?}> } }}
  */
-export function renderCheckFile({ sdk, table, checkFile, overridesDir, layers = [], rel, claimedSlots }) {
+export function renderCheckFile({ sdk, table, checkFile, genDir, overridesDir, layers = [], rel, claimedSlots }) {
   const dir = path.dirname(checkFile);
   const L = [];
   const lines = {};
@@ -27,8 +29,8 @@ export function renderCheckFile({ sdk, table, checkFile, overridesDir, layers = 
     push(`/** [STALE] TS2322 here = the installed ${sdk.name} differs from the one this file was generated for: run \`npx stunt-double gen\` */`);
     push(`export const __abi: SlotAbi = ${q(sdk.abi)};`, { role: 'abi' });
   }
-  push(`/** [WIRING] TS2305/TS2307 here = ${sdk.slotPackage} is not the project's generated package (tsconfig "paths" / link missing) */`);
-  for (const s of sdk.slotNames) push(`import { ${sdk.exportOf(s)} as ${s}__wired } from '${sdk.slotPackage}/${s}';`, { role: 'wiring', slot: s });
+  push(`/** [STALE] TS2305/TS2307 here = a generated shim (${rel(genDir)}/<Slot>.d.ts) is missing or out of date: run \`npx stunt-double gen\` */`);
+  for (const s of sdk.slotNames) push(`import { ${sdk.exportOf(s)} as ${s}__wired } from '${relSpec(dir, path.join(genDir, `${s}.js`))}';`, { role: 'wiring', slot: s });
   push(`/** [F2]/[F3] an SDK upgrade added or removed slots: TS1360/TS2353 here until regenerated */`);
   push(`export const __slotSet = { ${sdk.slotNames.map((s) => `${s}: ${s}__wired`).join(', ')} } satisfies Record<SlotName, unknown>;`, { role: 'slotset' });
   const probes = [];

@@ -2,7 +2,7 @@ import type { GenerateOptions, Project } from '../core/index.d.ts';
 
 export interface StuntDoubleWebpackOptions extends Omit<GenerateOptions, 'onError' | 'write'> {
   /**
-   * Run the contract type gate (src/stunt-double.check.ts). Default true: every `webpack` / `rspack build` run,
+   * Run the contract type gate (.stunt-double/check.ts). Default true: every `webpack` / `rspack build` run,
    * and in watch / dev-server mode after each rebuild that touched an override, its imports or the check file.
    * 'build' = only in non-watch runs. false = never (then chain `stunt-double check &&`).
    */

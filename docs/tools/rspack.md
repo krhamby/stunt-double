@@ -51,6 +51,7 @@ Two Rspack-specific notes:
 | F5 | Wrong export | build (also Rspack's own `ESModulesLinkingError`) | overlay ✓ |
 | F6a | The installed SDK imports its own default directly | build | overlay |
 | F6b | A config that was never wrapped | build: `Module not found: Can't resolve './STUNT-DOUBLE-NOT-WIRED -- …'` | same text, in the overlay |
+| F6c | Server build (`target: 'node'`) externalizes the SDK, e.g. with `webpack-node-externals` | handled: the wrapper keeps `@acme/core` and its sockets bundled for function externals ✓; a string or RegExp external that captures them fails the build with `[F6] "@acme/core" is external in this node build` ✓ | same |
 | F6e | Persistent cache after adding or removing an override | correct output with a warm cache ✓ | correct |
 | F6g | App code imports `@acme/core/original/X` | build | overlay |
 | F6h | Override added or removed without regenerating | regenerated; correct output ✓ | regenerated in the same rebuild ✓ |
@@ -69,4 +70,5 @@ Every production-build cell is run by the suite. In the dev column, ✓ marks th
 ## Known gaps
 
 - `exportsPresence: 'error'` applies to your whole build (see [webpack.md](webpack.md#known-gaps)).
+- Server builds: externals run before aliases, so an externalized SDK would be loaded by Node without your overrides. The wrapper wraps *function* externals (what `webpack-node-externals` returns) so `@acme/core`, brand layers and `@acme/core-slots/*` stay bundled. It can't rewrite string, RegExp or object externals; those fail the build with `[F6]` and the allowlist to add.
 - In a multi-compiler build each compiler reports the same problem, so you see each message twice.
