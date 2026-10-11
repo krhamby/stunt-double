@@ -76,7 +76,10 @@ export function stuntDouble(opts = {}) {
       if (!p?.sdk) return;
       const pk = p.packages;
       const inline = c.test?.server?.deps?.inline;
-      for (const [name, env] of Object.entries(c.environments ?? {})) {
+      // Farm's Vite-compat config proxy THROWS on keys it does not support (environments): no environments there.
+      let environments;
+      try { environments = c.environments; } catch {}
+      for (const [name, env] of Object.entries(environments ?? {})) {
         if (env.consumer === 'server') for (const n of pk) {
           const external = env.resolve?.external;
           const explicitlyExternal = Array.isArray(external) && external.includes(n);
@@ -129,7 +132,14 @@ export function stuntDouble(opts = {}) {
     // ---- build: AUD ---------------------------------------------------------------------------------
     buildEnd(err) {
       if (err || command === 'serve' || vitest || audit === false || !p?.sdk) return;
-      const problems = auditGraph(p, rollupGraph(this));
+      let graph;
+      try { graph = rollupGraph(this); } catch (e) {
+        // Farm's Vite-compat context has no getModuleIds() and drops this.warn(): say so on stderr (STA + TYP
+        // still ran at buildStart).
+        console.warn(`stunt-double: post-bundle audit skipped, this host has no module-graph API (${String(e?.message ?? e).split('\n')[0]})`);
+        return;
+      }
+      const problems = auditGraph(p, graph);
       if (problems.length) this.error(formatProblems(p, problems));
     },
 

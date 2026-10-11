@@ -1,0 +1,30 @@
+{
+  "name": "customer-farm",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A project that injects its own components into @acme/core with stunt-double (Farm 1.7, through Farm's Vite-plugin compatibility).",
+  "type": "module",
+  "scripts": {
+    "postinstall": "stunt-double gen --no-fail",
+    "dev": "farm start",
+    "build": "farm build && farm build -c farm.config.ssr.ts",
+    "check": "stunt-double check",
+    "probe": "node probes/render.mjs"
+  },
+  "dependencies": {
+    "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
+    "@acme/core-slots": "file:./sdk-slots",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@farmfe/cli": "1.0.5",
+    "@farmfe/core": "1.7.11",
+    "@farmfe/plugin-react": "1.2.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "react-refresh": "0.19.0",
+    "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
+    "typescript": "7.0.2"
+  }
+}
