@@ -1,6 +1,6 @@
 # stunt-double with Parcel 2
 
-Verified with **Parcel 2.16.4**, TypeScript 7.0.2, React 19.3.0 and Node 22.22.0 (October 2026). The verified example is [`examples/customer-parcel`](../../examples/customer-parcel) and the suite is [`tests/parcel.test.mjs`](../../tests/parcel.test.mjs).
+Verified with **Parcel 2.16.4**, TypeScript 7.0.2, React 19.3.0 and Node 22.22.0 (October 2026). The verified example is [`examples/customer-parcel`](../../examples/customer-parcel). The suite is [`tests/parcel.test.mjs`](../../tests/parcel.test.mjs) (`npm test -- parcel`): the shared mistake catalogue against a bare `parcel build` with no residual expectations, TypeScript 5.9 and 7, the universal tier, dev servers and the extra cases below.
 
 ## Setup
 
