@@ -28,7 +28,11 @@ export function stuntDoubleBun(opts = {}) {
   let p = null;
   let warned = false;
 
-  const fail = (message, problems = []) => { throw new StuntDoubleError(message, problems); };
+  const fail = (message, problems = []) => {
+    const e = new StuntDoubleError(message, problems);
+    Object.defineProperty(e, 'problems', { enumerable: false }); // Bun prints enumerable props: the message has them
+    throw e;
+  };
   const warn = () => {
     if (warned || !p?.warnings.length) return;
     warned = true;
