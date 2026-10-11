@@ -61,6 +61,11 @@ function withOne(config, opts) {
     }
   }
 
+  // Server targets: externals run on the raw request BEFORE resolve.alias, so webpack-node-externals and
+  // friends would hand @acme/core (or a socket) to Node, which then loads the SDK natively and the overrides
+  // never apply (or crashes on the .jsx shim). Keep the SDK, its layers and its sockets bundled.
+  if (p.sdk && config.externals) config.externals = guardExternals(config.externals, keepBundled(p));
+
   config.module ??= {};
   config.module.parser ??= {};
   config.module.parser.javascript = { ...config.module.parser.javascript, exportsPresence: 'error' };
@@ -69,6 +74,43 @@ function withOne(config, opts) {
 
   (config.plugins ??= []).push(new StuntDoublePlugin(p, { typecheck, audit }));
   return config;
+}
+
+/** request -> true when it names the SDK, a brand layer or the slot package (or a subpath of one). */
+function keepBundled(p) {
+  const names = [...p.packages, p.sdk.slotPackage];
+  return (req) => typeof req === 'string' && names.some((n) => req === n || req.startsWith(`${n}/`));
+}
+
+/**
+ * Function externals (webpack-node-externals, Next-style handlers, custom ones) are wrapped so they never see
+ * our packages. Strings, RegExps and objects that name them are left alone: the graph audit reports them ([F6]).
+ */
+function guardExternals(externals, keep) {
+  if (Array.isArray(externals)) return externals.map((e) => guardExternals(e, keep));
+  if (typeof externals !== 'function') return externals;
+  const fn = externals;
+  if (fn.length === 3) {
+    // webpack 4 style (context, request, callback), still accepted by webpack 5
+    return function stuntDoubleExternals(context, request, callback) {
+      return keep(request) ? callback() : fn.call(this, context, request, callback);
+    };
+  }
+  return function stuntDoubleExternals(data, callback) {
+    return keep(data?.request) ? (callback ? callback() : Promise.resolve(undefined)) : fn.call(this, data, callback);
+  };
+}
+
+/** External modules (webpack ExternalModule / Rspack external) whose request names the SDK or a socket. */
+function capturedExternals(modules, keep) {
+  const out = new Set();
+  for (const m of modules) {
+    const isExternal = m?.externalType !== undefined || m?.constructor?.name === 'ExternalModule' || /^external /.test(String(m?.identifier?.() ?? ''));
+    if (!isExternal) continue;
+    const req = m.userRequest ?? (Array.isArray(m.request) ? m.request[0] : typeof m.request === 'string' ? m.request : null);
+    if (keep(req)) out.add(req);
+  }
+  return [...out];
 }
 
 /** F6e defence in depth: a decision change also changes the persistent-cache version. */
@@ -127,7 +169,8 @@ export class StuntDoublePlugin {
       const report = (message) => { const e = makeError(message); ours.add(e); compilation.errors.push(e); };
       // webpack sorts module-less errors after every module error, and CRA prints only the first error: put the
       // [Fx] errors first, they explain the module errors that follow (e.g. a stale shim's "Module not found").
-      compilation.hooks.processErrors?.tap(NAME, (errors) => [...errors.filter((e) => ours.has(e)), ...errors.filter((e) => !ours.has(e))]);
+      // (Rspack has no processErrors and its hooks getter THROWS for unknown hooks: guard, don't optional-chain.)
+      try { compilation.hooks.processErrors?.tap(NAME, (errors) => [...errors.filter((e) => ours.has(e)), ...errors.filter((e) => !ours.has(e))]); } catch {}
       if (p.problems.length) report(formatProblems(p));
       if (p.warnings.length && !this.warned) { this.warned = true; compilation.warnings.push(makeError(formatWarnings(p))); }
       compilation.contextDependencies.add(p.overridesDir);
@@ -144,6 +187,8 @@ export class StuntDoublePlugin {
       compilation.hooks.finishModules.tapPromise(NAME, async (modules) => {
         if (this.opts.audit !== false && p.sdk && !p.problems.length) {
           const problems = auditGraph(p, webpackGraph(compilation, modules));
+          for (const req of capturedExternals(modules, keepBundled(p)))
+            problems.push(`[F6] "${req}" is external in this ${compiler.options.target ?? 'web'} build: the runtime would load ${p.sdk.name} natively and slot overrides could not apply. Remove it from "externals" (webpack-node-externals: allowlist: [/^${p.packages.concat(p.sdk.slotPackage).map((n) => n.replace(/[/.]/g, (c) => `\\${c}`)).join('|^')}/]).`);
           if (problems.length) report(formatProblems(p, problems));
         }
         if (gate) {

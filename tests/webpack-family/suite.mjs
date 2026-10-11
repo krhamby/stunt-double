@@ -146,6 +146,29 @@ export function defineSuite(t) {
     assertFails({ status: r.status, out: `${r.stdout}${r.stderr}` }, /\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but [^\n]*PriceTag\.jsx is not in the bundle/);
   });
 
+  // Server targets: externals run before resolve.alias. webpack-node-externals would hand @acme/core to Node
+  // (build exit 0, then a runtime crash on the .jsx shim): the adapter keeps the SDK bundled.
+  const serverExternals = (d, externals) => {
+    npmInstall(d, '--no-save', 'webpack-node-externals@3.0.0');
+    const cfg = read(d, t.configFile)
+      .replace("import { withStuntDouble }", "import nodeExternals from 'webpack-node-externals';\nimport { withStuntDouble }")
+      .replace("    target: 'node',\n", `    target: 'node',\n    externalsPresets: { node: true },\n    externals: ${externals},\n`);
+    assert.match(cfg, /externalsPresets/, 'the SSR config must declare target: node');
+    write(d, t.configFile, cfg);
+  };
+  test(`${t.tool}: F6c server target with webpack-node-externals: SDK and sockets stay bundled`, () => {
+    const d = fresh();
+    serverExternals(d, "[nodeExternals({ importType: 'module' })]");
+    const r = build(d);
+    assertRenders(d, r);
+    assert.doesNotMatch(read(d, 'dist-ssr/entry-server.mjs'), /from\s*"@acme\/core/, '@acme/core must be bundled into the SSR output');
+  });
+  test(`${t.tool}: F6c a RegExp external capturing the SDK fails the build`, () => {
+    const d = fresh();
+    serverExternals(d, '[/^@acme\\/core/]');
+    assertFails(build(d), /\[F6\] "@acme\/core" is external in this node build/);
+  });
+
   test(`${t.tool}: F6e warm persistent cache never serves an old decision`, () => {
     const d = fresh();
     const saved = read(d, 'src/overrides/PriceTag.tsx');
