@@ -6,11 +6,12 @@
 // What it does:
 //   config load     STA (generate) + ONE static alias per slot  @acme/core-slots/<Slot>$ -> <root>/sdk-slots/gen/<Slot>.jsx,
 //                   exportsPresence 'error' (F5), cache.version folds the fingerprint (F6e)
+//   run             STA problems -> fatal error (one-shot builds; survives bail:true)
 //   thisCompilation STA problems -> compilation.errors (exit 1 + dev overlay; never throw)
 //   finishModules   AUD (graph audit) + TYP (type gate, production mode only) -> compilation.errors
 //   watchRun        regenerate (poisoned shims on problems) so dev picks up override changes
 import path from 'node:path';
-import { generate, regenerate } from '../core/generate.mjs';
+import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, webpackGraph } from '../core/audit.mjs';
 import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
@@ -43,6 +44,13 @@ export class StuntDoublePlugin {
   apply(compiler) {
     const { WebpackError } = compiler.webpack;
     const prod = (this.opts.mode ?? compiler.options.mode) === 'production';
+    // One-shot builds (compiler.run, not watch): fail before compiling. With `bail: true` (Storybook's
+    // builder-webpack5 sets it in production) the first module error, e.g. "Can't resolve
+    // '@acme/core-slots/Logo'" for a shim that was not emitted, aborts the build and errors pushed to
+    // compilation.errors are never printed.
+    compiler.hooks.run.tapPromise(NAME, async () => {
+      if (this.p.problems.length) throw new StuntDoubleError(formatProblems(this.p), this.p.problems);
+    });
     compiler.hooks.watchRun.tap(NAME, () => {
       this.p = regenerate(this.p, { onError: 'poison' });
       if (this.p.changedFiles.length) {
