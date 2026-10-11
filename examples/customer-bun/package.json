@@ -11,7 +11,7 @@
     "postinstall": "stunt-double gen --no-fail",
     "dev": "bun ./index.html",
     "build": "bun build.ts",
-    "test": "stunt-double check && bun test",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check": "stunt-double check",
     "probe": "node probes/render.mjs"
