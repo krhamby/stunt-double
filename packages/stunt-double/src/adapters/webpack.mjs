@@ -43,6 +43,9 @@ function withOne(config, opts) {
   const { typecheck = true, audit = true, mode: _mode, ...genOpts } = opts;
   const root = path.resolve(opts.root ?? config.context ?? process.cwd());
   const p = generate({ ...genOpts, root, onError: 'return' });
+  // A bailing run (CRA's production config sets bail: true) aborts at the first module error, typically the
+  // previous shim of a renamed override, so the [Fx] problems would never be printed. Report them instead.
+  if (p.problems.length && config.bail) config.bail = false;
 
   if (p.sdk) {
     config.resolve ??= {};
@@ -115,7 +118,11 @@ export class StuntDoublePlugin {
 
     compiler.hooks.thisCompilation.tap(NAME, (compilation) => {
       const p = this.p;
-      const report = (message) => { compilation.errors.push(makeError(message)); };
+      const ours = new Set();
+      const report = (message) => { const e = makeError(message); ours.add(e); compilation.errors.push(e); };
+      // webpack sorts module-less errors after every module error, and CRA prints only the first error: put the
+      // [Fx] errors first, they explain the module errors that follow (e.g. a stale shim's "Module not found").
+      compilation.hooks.processErrors?.tap(NAME, (errors) => [...errors.filter((e) => ours.has(e)), ...errors.filter((e) => !ours.has(e))]);
       if (p.problems.length) report(formatProblems(p));
       if (p.warnings.length && !this.warned) { this.warned = true; compilation.warnings.push(makeError(formatWarnings(p))); }
       compilation.contextDependencies.add(p.overridesDir);
