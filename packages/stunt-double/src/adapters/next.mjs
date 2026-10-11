@@ -98,7 +98,7 @@ function withWebpackSlots(config, p, { audit, dev }) {
   config.module.parser.javascript = { ...config.module.parser.javascript, exportsPresence: 'error' }; // F5 for javascript/auto
   if (config.cache && typeof config.cache === 'object' && config.cache.type === 'filesystem')
     config.cache.version = `${config.cache.version ?? ''}|${NAME}:${p.fingerprint}`;
-  (config.plugins ??= []).push(new StuntDoubleNextWebpackPlugin(p, { audit: audit && !dev }));
+  (config.plugins ??= []).push(new StuntDoubleNextWebpackPlugin(p, { audit: audit && !dev, dev }));
   return config;
 }
 
@@ -112,7 +112,9 @@ class StuntDoubleNextWebpackPlugin {
     });
     compiler.hooks.thisCompilation.tap(NAME, (compilation) => {
       const err = (m) => compilation.errors.push(new WebpackError(m)); // never throw: a throw skips the dev overlay
-      if (this.p.problems.length) err(formatProblems(this.p));
+      // dev: the poisoned shims report through Next's own channel (overlay / HTTP 500). Pushing the problems
+      // here as well would also fail Next's error-page compilation, and the 500 page loses the message.
+      if (!this.opts.dev && this.p.problems.length) err(formatProblems(this.p));
       compilation.contextDependencies.add(this.p.overridesDir);
       if (this.p.configFile) compilation.fileDependencies.add(this.p.configFile);
       if (!this.opts.audit) return;
