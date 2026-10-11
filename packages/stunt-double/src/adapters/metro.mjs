@@ -9,7 +9,7 @@
 // throw IS the gate (`metro build`, `react-native bundle`, `expo export` all exit 1):
 //   config load        STA (generate, onError 'throw')                          -> throw
 //                      TYP (sync tsc) in one-shot bundle commands (typecheck 'auto') -> throw
-//   resolveRequest     ONE static rule  @acme/core-slots/<Slot> -> <root>/sdk-slots/gen/<Slot>.jsx,
+//   resolveRequest     ONE static rule  @acme/core-slots/<Slot> -> <genDir>/<Slot>.jsx (p.shimFile),
 //                      chained in front of any previous resolveRequest
 //   serializer hook    AUD: the bundled module graph (F6 bypass / socket resolved elsewhere, F8) -> throw
 //   dev (start/serve)  STA problems poison the shims instead (the server starts, every bundle request shows the
@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { generate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate, resolveTypeScript, writeCheckTsconfig } from '../core/typegate.mjs';
 import { auditGraph } from '../core/audit.mjs';
-import { formatProblems, formatWarnings, mapDiagnostics, header } from '../core/diagnostics.mjs';
+import { formatProblems, formatWarnings, formatReport, mapDiagnostics, header } from '../core/diagnostics.mjs';
 import { watchProject } from '../core/watch.mjs';
 import { readJson } from '../core/util.mjs';
 
@@ -38,10 +38,10 @@ export function detectCommand(argv = process.argv) {
 export function runTypeGateSync(p) {
   if (p.problems.length) return { ok: false, message: formatProblems(p) };
   const ts = resolveTypeScript(p);
-  if (ts.error) return { ok: false, message: `${header(p, 1)}\n  ${ts.error}` };
+  if (ts.error) return { ok: false, message: formatReport(header(p, 1), [ts.error]) };
   if (p.isPnP && ts.major >= 7) {
     const line = `[TS-PNP] TypeScript ${ts.version} cannot resolve modules under Yarn Plug'n'Play: set "typescript": "typescript5" (npm alias of typescript@5.9) in stunt-double.config.json.`;
-    return { ok: false, message: `${header(p, 1)}\n  ${line}` };
+    return { ok: false, message: formatReport(header(p, 1), [line]) };
   }
   const tsconfigFile = writeCheckTsconfig(p);
   const t0 = performance.now();
@@ -51,10 +51,10 @@ export function runTypeGateSync(p) {
   } catch (err) {
     const ms = Math.round(performance.now() - t0);
     const output = `${err.stdout ?? ''}${err.stderr ?? ''}`;
-    let lines = mapDiagnostics(p, output, readJson(path.join(p.genDir, 'check.map.json')));
+    let lines = mapDiagnostics(p, output, readJson(p.mapFile));
     if (!lines.length) lines = [`[TS] tsc exited with ${err.status ?? err.signal}: ${output.trim().split('\n').slice(0, 5).join(' | ') || err.message}`];
     const suffix = ` (tsc ${ts.version}, ${ms} ms)`;
-    return { ok: false, ms, version: ts.version, message: `${header(p, lines.length)}\n  ${lines.map((l, i) => (i === 0 ? l + suffix : l)).join('\n  ')}` };
+    return { ok: false, ms, version: ts.version, message: formatReport(header(p, lines.length), lines.map((l, i) => (i === 0 ? l + suffix : l))) };
   }
 }
 

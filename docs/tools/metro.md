@@ -2,6 +2,9 @@
 
 ## Setup
 
+1. `npm i -D stunt-double`
+2. Wrap the config in `metro.config.js`:
+
 ```js
 // metro.config.js (CommonJS is fine)
 const { getDefaultConfig } = require('@react-native/metro-config'); // Expo: require('expo/metro-config')
@@ -10,7 +13,9 @@ const { withStuntDouble } = require('stunt-double/metro');
 module.exports = withStuntDouble(getDefaultConfig(__dirname));
 ```
 
-The adapter needs no `@acme/core-slots` link: it answers every socket itself, even while npm's auto-installed registry placeholder sits in `node_modules`. For now, keep the tsconfig `paths` entry and the check file in `files` from `npx stunt-double init` for the type gate.
+3. Put overrides in `src/overrides/<Slot>.tsx`.
+
+That's all: no tsconfig, `.gitignore` or `package.json` edits. Generated files go to `.stunt-double/` at the project root, which ignores itself. The adapter answers every `@acme/core-slots/*` import itself, even while npm's auto-installed registry placeholder sits in `node_modules`.
 
 CI runs `npx stunt-double check`. A working example is in [`examples/customer-metro`](../../examples/customer-metro).
 
@@ -24,7 +29,7 @@ Metro has no build-start hook, so the adapter does its checks in three places:
 |---|---|---|
 | Config load | STA: `generate()` validates the overrides and writes the shims | Throws. `metro build`, `react-native bundle` and `expo export` exit 1 with the `[Fx]` lines |
 | Config load, one-shot bundle commands only | TYP: `tsc` on `src/stunt-double.check.ts`, run synchronously (TS 7: about 150 ms) | Throws, exit 1 |
-| `resolver.resolveRequest` | `@acme/core-slots/<Slot>` → `sdk-slots/gen/<Slot>.jsx`. Any earlier `resolveRequest` is chained for every other specifier | n/a |
+| `resolver.resolveRequest` | `@acme/core-slots/<Slot>` → `.stunt-double/gen/<Slot>.jsx`. Any earlier `resolveRequest` is chained for every other specifier | n/a |
 | `serializer.experimentalSerializerHook` | AUD: audits the built module graph for F6 (a default bundled from outside the allowed files, or a socket that resolved somewhere other than its shim) and F8 (duplicate bundled packages) | Throws, the bundle fails. Any previous hook is chained |
 
 A Metro config must stay a plain object, because other wrappers such as `withNativeWind` or `withSentryConfig` compose with it. For that reason the type gate runs synchronously instead of returning a promise.
@@ -51,7 +56,7 @@ Other options:
 - metro 0.87.1 and @react-native/metro-config 0.87.1 (with its default @react-native/metro-babel-transformer).
 - node 22.22.0, TypeScript 7.0.2, react / react-dom 19.3.0.
 - Package `exports` resolution (`unstable_enablePackageExports`, default `true` in Metro 0.87) resolves `@acme/core/original/*`, and, in the universal tier, the linked slot package's `exports "./*"`. Metro follows the symlink natively.
-- The generated files can live in a dot directory (`.stunt-double/gen`): `metro build` resolves, transforms and indexes them, and `metro serve` picks up rewrites live. No `watchFolders` or `blockList` change is needed.
+- Metro handles the dot directory `.stunt-double/gen`: `metro build` resolves, transforms and indexes the files there, and `metro serve` picks up rewrites live. No `watchFolders` or `blockList` change is needed.
 - **Expo:** manually checked once, and not part of the test suite (the install is 265 MB):
   - expo 57.0.27 with `expo/metro-config` (@expo/metro-config 57.0.13) **pins metro 0.84.5, not 0.87**;
   - `withStuntDouble(getDefaultConfig(__dirname))` composes with Expo's config, including its `customSerializer`;
