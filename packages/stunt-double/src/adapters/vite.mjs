@@ -108,7 +108,10 @@ export function stuntDouble(opts = {}) {
       // Vitest's server.deps.inline only applies inside Vitest. Outside it (vite build --ssr, the dev SSR
       // module runner) the plugin's own inline entry must not count as coverage.
       const inline = vitest ? c.test?.server?.deps?.inline : undefined;
-      for (const [name, env] of Object.entries(c.environments ?? {})) {
+      // Farm's Vite-compat config proxy THROWS on keys it does not support (environments): no environments there.
+      let environments;
+      try { environments = c.environments; } catch {}
+      for (const [name, env] of Object.entries(environments ?? {})) {
         if (env.consumer === 'server') for (const n of pk) {
           const external = env.resolve?.external;
           // an explicit external list beats noExternal in Vite; `external: true` does not (noExternal wins)
@@ -154,11 +157,19 @@ export function stuntDouble(opts = {}) {
     async buildStart() {
       if (command === 'serve' || vitest) return;
       if (checkedAtConfig) { checkedAtConfig = false; return; } // first build of `vite build`: already checked
-      if (this.meta?.watchMode) { p = load(p.root, 'return'); gate = null; } // `vite build --watch` rebuilds
+      const watching = !!this.meta?.watchMode;
+      if (watching) {
+        // `vite build --watch` / Rollup / Rolldown watch: regenerate on every rebuild, and watch the overrides dir
+        // + config, which are not in the module graph (an added Buton.tsx must trigger a rebuild and fail it).
+        p = load(p.root, 'return');
+        gate = null;
+        if (p?.sdk) for (const f of [p.overridesDir, p.configFile]) if (f) this.addWatchFile(f);
+      }
       if (p.problems.length) this.error(reportError(formatProblems(p)));
       if (p.warnings.length && !warned) { warned = true; this.warn(formatWarnings(p)); }
       if (typecheck === false) return;
-      gate ??= runTypeGate(p);
+      // The gate memo ignores override CONTENTS: a watch rebuild must re-run it.
+      gate ??= runTypeGate(p, { force: watching });
       const r = await gate;
       if (!r.ok) this.error(reportError(r.message));
     },
@@ -166,7 +177,14 @@ export function stuntDouble(opts = {}) {
     // ---- build: AUD ---------------------------------------------------------------------------------
     buildEnd(err) {
       if (err || command === 'serve' || vitest || audit === false || !p?.sdk) return;
-      const problems = auditGraph(p, rollupGraph(this));
+      let graph;
+      try { graph = rollupGraph(this); } catch (e) {
+        // Farm's Vite-compat context has no getModuleIds() and drops this.warn(): say so on stderr (STA + TYP
+        // still ran before bundling).
+        console.warn(`stunt-double: post-bundle audit skipped, this host has no module-graph API (${String(e?.message ?? e).split('\n')[0]})`);
+        return;
+      }
+      const problems = [...(viteConfigured ? [] : externalSdk(p, this)), ...auditGraph(p, graph)];
       if (problems.length) this.error(reportError(formatProblems(p, problems)));
     },
 
@@ -213,6 +231,26 @@ export function stuntDouble(opts = {}) {
       for (const ev of ['add', 'unlink', 'change', 'addDir', 'unlinkDir']) s.watcher.on(ev, kick);
     },
   };
+}
+
+/**
+ * Standalone Rollup / Rolldown: [F6] when `external` (an array, regex or function: a common "externalize every
+ * dependency" server config) left the SDK or a socket external. Node would load the SDK natively, where no
+ * override can apply. Types-only `<sdk>/contracts` may stay external.
+ */
+function externalSdk(p, ctx) {
+  const { name, slotPackage } = p.sdk;
+  const bare = (id) => id === slotPackage || id.startsWith(slotPackage + '/') || id === name || (id.startsWith(name + '/') && id !== `${name}/contracts`);
+  const inNm = (pkg) => `${path.sep}node_modules${path.sep}${pkg.split('/').join(path.sep)}${path.sep}`;
+  const hit = (id) => (path.isAbsolute(id) ? id.includes(inNm(name)) || id.includes(inNm(slotPackage)) : bare(id));
+  const ids = [];
+  for (const id of ctx.getModuleIds()) {
+    const info = ctx.getModuleInfo(id);
+    // Rollup: isExternal. Rolldown 1.2 has no isExternal; an external module has code === null there.
+    if ((info?.isExternal ?? info?.code === null) && hit(id)) ids.push(path.isAbsolute(id) ? p.rel(id) : id);
+  }
+  if (!ids.length) return [];
+  return [`[F6] the bundle leaves ${ids.map((s) => `"${s}"`).join(', ')} external: Node would load ${ids.length > 1 ? 'them' : 'it'} natively, where slot overrides cannot apply (the registry placeholder answers the sockets there). Bundle ${name}: make \`external\` exclude ${name} and ${slotPackage}.`];
 }
 
 /** Alias-only fragment for configs that cannot take plugins (no validation: chain `stunt-double check &&`). */

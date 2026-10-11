@@ -1,0 +1,8 @@
+# Bun dev server (`bun ./index.html`): bundles HTML routes with these plugins. stunt-double resolves the
+# SDK sockets, writes poisoned shims on injection errors (Bun error overlay) and watches src/overrides.
+[serve.static]
+plugins = ["stunt-double/bun"]
+
+# bun test: validates (STA + type gate; exits 1 with [Fx]) and points the SDK socket imports at the shims.
+[test]
+preload = ["stunt-double/bun-test"]

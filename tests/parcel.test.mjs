@@ -186,7 +186,7 @@ describe('positive', () => {
     reset();
     const ok = sh('npx stunt-double doctor');
     assert.equal(ok.code, 0, ok.out);
-    assert.match(ok.out, /\.parcelrc: stunt-double\/parcel resolver present/);
+    assert.doesNotMatch(ok.out, /\[DOCTOR\] script/);
     rm('.parcelrc');
     const bad = sh('npx stunt-double doctor');
     assert.notEqual(bad.code, 0, bad.out);

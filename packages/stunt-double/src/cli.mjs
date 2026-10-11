@@ -11,7 +11,7 @@ import { describeChain } from './core/plan.mjs';
 import { readTsconfig } from './core/tsconfig.mjs';
 import { CONFIG_FILE } from './core/config.mjs';
 import { TOOL_VERSION } from './core/manifest.mjs';
-import { readJson, posix, listFiles, fileExists, plural, parseJsonc } from './core/util.mjs';
+import { readJson, posix, listFiles, fileExists, plural } from './core/util.mjs';
 import { cmdInit, INIT_FLAGS, TOOL_CONFIGS } from './init.mjs';
 
 const DOCS = 'https://github.com/krhamby/stunt-double#readme';
@@ -225,16 +225,9 @@ export function ${exp}(props: SlotProps['${slot}']): ReactNode {
 }
 
 // ---------------------------------------------------------------------------------------------------------
-const ADAPTERLESS = /(^|&&\s*|;\s*)(npx\s+)?(parcel|bun\s+build|esbuild|tsup|farm)\b/;
+// `bun build` is the CLI (cannot load plugins); `bun build.ts` runs a Bun.build() script (the adapter's home).
+const ADAPTERLESS = /(^|&&\s*|;\s*)(npx\s+)?(parcel|bun\s+build(?![\w./-])|esbuild|tsup|farm)\b/;
 const LINK_FORM = { npm: 'file:', pnpm: 'link:', yarn: 'portal:', bun: 'workspace:' };
-
-/** .parcelrc lists a local resolver file that loads stunt-double/parcel (Parcel rejects the package name itself). */
-function parcelHasAdapter(root) {
-  let rc;
-  try { rc = parseJsonc(fs.readFileSync(path.join(root, '.parcelrc'), 'utf8')); } catch { return false; }
-  return (rc?.resolvers ?? []).some((r) => typeof r === 'string' && r.startsWith('.')
-    && /stunt-double\/parcel/.test((() => { try { return fs.readFileSync(path.resolve(root, r), 'utf8'); } catch { return ''; } })()));
-}
 
 /** Tsconfigs that opted into editor checking: their text names a check file (current, or a stale location). */
 function editorOptIns(p) {
@@ -299,11 +292,16 @@ async function cmdDoctor(a) {
     if (!text.includes('stunt-double')) errors.push(`[DOCTOR] ${f} does not use ${t.adapter}: ${t.tool} would resolve the registry placeholder (or, in the universal tier, skip validation and the type gate). Add: ${t.hint}`);
     else notes.push(`${f}: adapter present`);
   }
-  // scripts of adapter-less tools must chain the check (Parcel with the stunt-double/parcel resolver has one)
-  const parcelAdapter = parcelHasAdapter(p.root);
-  if (parcelAdapter) notes.push('.parcelrc: stunt-double/parcel resolver present');
+  // scripts of adapter-less tools must chain the check. Farm (stuntDouble() in farm.config vitePlugins) and Parcel
+  // (a stunt-double resolver in .parcelrc) are adapter tier when their own config wires it.
+  const wired = new Set();
+  for (const f of fs.readdirSync(p.root)) {
+    const tool = /^farm\.config\.(m|c)?[jt]s$/.test(f) ? 'farm' : f === '.parcelrc' ? 'parcel' : null;
+    if (tool && fs.readFileSync(path.join(p.root, f), 'utf8').includes('stunt-double')) wired.add(tool);
+  }
+  const adapterless = (script) => [...script.matchAll(new RegExp(ADAPTERLESS.source, 'g'))].some((m) => !wired.has(m[3].split(/\s+/)[0]));
   for (const [name, script] of Object.entries(pkg.scripts ?? {}))
-    if (ADAPTERLESS.test(parcelAdapter ? script.replace(/(^|&&\s*|;\s*)(npx\s+)?parcel\b/g, '$1') : script) && !/stunt-double\s+check\s*&&/.test(script))
+    if (adapterless(script) && !/stunt-double\s+check\s*&&/.test(script))
       errors.push(`[DOCTOR] script "${name}" runs a tool without a stunt-double adapter and without the gate: "stunt-double check && ${script}"${p.tier === 'universal' ? '' : ' (that tool also needs the universal tier: npx stunt-double init --universal)'}`);
   // universal tier: package-manager link form
   if (p.sdk && p.link) {

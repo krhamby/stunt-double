@@ -68,6 +68,10 @@
       "types": "./src/adapters/bun.d.ts",
       "default": "./src/adapters/bun.mjs"
     },
+    "./bun-test": {
+      "types": "./src/adapters/bun-test.d.ts",
+      "default": "./src/adapters/bun-test.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
