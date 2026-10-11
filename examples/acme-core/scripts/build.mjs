@@ -3,7 +3,8 @@
 //   1. assemble build/<variant>/src  (base src/ + variants/<chain>/src overlays, minus "delete")
 //   2. tsc emit (one file per module, specifiers byte-for-byte, 'use client' prologues kept, .d.ts beside JS)
 //   3. write package.json + slot-manifest.json (from slots.json, the defineSlots() table)
-//   4. stunt-double sdk-lint --write: the publish gate; also writes consumers, the ABI pin and the config schema
+//   4. stunt-double sdk-lint --fix --write: points the published .d.ts files at the originals (never the socket
+//      package, so apps need no tsconfig "paths"), runs the publish gate, writes consumers, the ABI and the schema
 //   5. npm pack into <repo>/.packs
 // Usage: node scripts/build.mjs [--variant 1.1.0 ...] [--packs <dir>] [--no-pack]
 import fs from 'node:fs';
@@ -125,8 +126,8 @@ function build(id) {
     removedSlots: slotsSpec.removedSlots ?? {},
   };
   fs.writeFileSync(path.join(out, 'slot-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-  // 4. the publish gate
-  const lint = sdkLint(out, { write: true });
+  // 4. the publish gate (--fix: published declarations re-export the originals, not the sockets)
+  const lint = sdkLint(out, { write: true, fix: true });
   for (const w of lint.warnings) console.warn(`  ${w}`);
   if (!lint.ok) {
     if (v.lint === false) console.warn(`  sdk-lint SKIPPED for ${id} (deliberately broken fixture); it reports:\n    ${lint.errors.join('\n    ')}`);
