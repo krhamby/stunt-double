@@ -1,12 +1,14 @@
-// `stunt-double sdk-lint [pkgDir] [--write]`: the SDK's publish gate. Uses the same dist scanner that every
-// project runs on the installed SDK. With --write it also computes manifest `consumers` (W7) and the `abi`
-// pin, rewrites `export type SlotAbi` in contracts.d.ts, and writes stunt-double.schema.json.
+// `stunt-double sdk-lint [pkgDir] [--fix] [--write]`: the SDK's publish gate. Uses the same dist scanner that
+// every project runs on the installed SDK. With --fix it first points the published .d.ts files at the originals
+// instead of the sockets (sdkdts.mjs; rule SDK6). With --write it also computes manifest `consumers` (W7) and
+// the `abi` pin, rewrites `export type SlotAbi` in contracts.d.ts, and writes stunt-double.schema.json.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseSync } from 'oxc-parser';
 import { scanDist } from './distscan.mjs';
 import { parseModule } from './parse.mjs';
 import { DEFAULTS } from './config.mjs';
+import { rewriteSocketDts, publishedDtsFiles, socketMentions } from './sdkdts.mjs';
 import { readJson, real, sha, posix, fileExists } from './util.mjs';
 
 function findPackageDir(start) {
@@ -56,8 +58,7 @@ export function schemaFor(manifest) {
       $schema: str,
       sdk: { const: manifest.sdk },
       overridesDir: { ...str, default: DEFAULTS.overridesDir },
-      slotsDir: { ...str, default: DEFAULTS.slotsDir },
-      checkFile: { ...str, default: DEFAULTS.checkFile },
+      outDir: { ...str, default: '.stunt-double', description: 'the one generated directory (the universal tier derives it from the link)' },
       tsconfig: str,
       typescript: { ...str, default: 'typescript', description: 'package name of the gate compiler, e.g. "typescript5" (npm alias of typescript@5.9)' },
       rsc: { enum: ['auto', true, false] },
@@ -74,7 +75,7 @@ export function schemaFor(manifest) {
       allowOriginalImports: arr,
       singletons: arr,
       scanPackages: arr,
-      relativeEdges: { enum: ['error', 'redirect'] },
+      relativeEdges: { enum: ['error'] },
       sourceDirs: arr,
     },
   };
@@ -83,7 +84,7 @@ export function schemaFor(manifest) {
 /**
  * @returns {{ ok: boolean, errors: string[], warnings: string[], written: string[], manifest: object, pkgDir: string }}
  */
-export function sdkLint(start = process.cwd(), { write = false } = {}) {
+export function sdkLint(start = process.cwd(), { write = false, fix = false } = {}) {
   const pkgDir = findPackageDir(start);
   if (!pkgDir) return { ok: false, errors: [`[SDK] no package.json + slot-manifest.json found at or above ${start}`], warnings: [], written: [] };
   const pkg = readJson(path.join(pkgDir, 'package.json'));
@@ -106,6 +107,17 @@ export function sdkLint(start = process.cwd(), { write = false } = {}) {
     defaultFile: (s) => (slots[s]?.default ? path.join(pkgDir, slots[s].default) : null),
     exportOf: (s) => slots[s]?.export ?? s,
   };
+  // rule 6 (--fix): published declarations point at the originals, never at the socket package
+  if (fix && slotPackage) {
+    const r = rewriteSocketDts({ pkgDir, pkg, manifest });
+    errors.push(...r.errors);
+    written.push(...r.written);
+  }
+  if (slotPackage) for (const f of publishedDtsFiles(pkgDir, pkg)) {
+    if (/(^|[\\/])contracts\.d\.[cm]?ts$/.test(f)) continue; // rule 3 reports contracts precisely
+    for (const m of socketMentions(f, slotPackage))
+      errors.push(`[SDK6] ${rel(f)}:${m.line} references "${m.spec}": published types must not mention ${slotPackage} (apps resolve it to the registry placeholder and would need tsconfig "paths"). Run stunt-double sdk-lint --fix after tsc.`);
+  }
   // package.json shape
   const ex = pkg.exports ?? {};
   for (const k of ['./original/*', './contracts', './slot-manifest.json']) if (!ex[k]) errors.push(`[SDK] package.json "exports" lacks "${k}"`);

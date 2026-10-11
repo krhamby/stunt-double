@@ -69,7 +69,7 @@ export function scanDist({ sdk, pkgDir, label = sdk.name, rel, cacheFile = null,
   }
   for (const e of edges) {
     const comp = path.basename(e.display).replace(/\.[^.]+$/, '');
-    problems.push(`[F6] ${rel(e.display)} imports the default of slot "${e.slot}" directly ("${e.spec}"): overrides are NOT applied inside ${comp}. SDK bug: it must import "${sdk.slotPackage}/${e.slot}". Workaround: stunt-double slotify (docs §10).`);
+    problems.push(`[F6] ${rel(e.display)} imports the default of slot "${e.slot}" directly ("${e.spec}"): overrides are NOT applied inside ${comp}. SDK bug: it must import "${sdk.slotPackage}/${e.slot}" (sdk-lint rejects this); ask the SDK team for a fixed release.`);
   }
   for (const u of unknownSockets)
     problems.push(`[F6] ${rel(u.file)} imports "${sdk.slotPackage}/${u.slot}", which is not a slot in ${sdk.name}@${sdk.version}'s slot-manifest.json: SDK bug (sdk-lint rejects this).`);
