@@ -1,0 +1,21 @@
+---
+import { App } from '../components/App';
+import { CartIsland } from '../components/CartIsland';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>customer-astro: stunt-double example</title>
+  </head>
+  <body>
+    <main>
+      <h1>customer-astro</h1>
+      <App />
+      <section data-probe="island">
+        <CartIsland client:load />
+      </section>
+    </main>
+  </body>
+</html>
