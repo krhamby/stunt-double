@@ -48,7 +48,7 @@ describe('positive: overrides render in app code and inside SDK components', () 
     assert.match(r.out, /chromium/i);
     const vite = path.join(ws.dir, 'node_modules/.vite');
     const files = fs.existsSync(vite) ? fs.readdirSync(vite, { recursive: true }).map(String).filter((f) => f.endsWith('.js')) : [];
-    for (const f of files) assert.doesNotMatch(fs.readFileSync(path.join(vite, f), 'utf8'), /BRAND_(BUTTON|PRICE|LOGO)|sdk-slots\/gen/, `F6d: ${f} froze a project module`);
+    for (const f of files) assert.doesNotMatch(fs.readFileSync(path.join(vite, f), 'utf8'), /BRAND_(BUTTON|PRICE|LOGO)|\.stunt-double\/gen/, `F6d: ${f} froze a project module`);
   });
   it('opt-in type gate (globalSetup) passes on correct overrides', () => passes(vitest('-c', 'vitest.typecheck.config.ts')));
   it('stunt-double check and tsc -b pass', () => {
@@ -109,6 +109,7 @@ describe('wiring and graph mistakes (F6)', () => {
   });
   it('F6b: a second vitest config without the plugin, universal-tier link installed: Node refuses the .jsx shim, never renders defaults', () => {
     ws.linkSlots();
+    assert.equal(ws.run('stunt-double', ['gen']).code, 0);
     try {
       const r = vitest('-c', 'vitest.unwired.config.ts');
       assert.notEqual(r.code, 0, explain(r));
@@ -117,6 +118,7 @@ describe('wiring and graph mistakes (F6)', () => {
   });
   it('F6b: the same config with jsdom: fails the same way', () => {
     ws.linkSlots();
+    assert.equal(ws.run('stunt-double', ['gen']).code, 0);
     ws.edit('vitest.unwired.config.ts', (s) => s.replace("environment: 'node', include: ['src/**/*.node.test.tsx']", "environment: 'jsdom', include: ['src/**/*.dom.test.tsx']"));
     try {
       const r = vitest('-c', 'vitest.unwired.config.ts');
@@ -167,9 +169,9 @@ describe('wiring and graph mistakes (F6)', () => {
     ws.remove('src/overrides/PriceTag.tsx');
     assert.equal(ws.run('stunt-double', ['gen']).code, 0);
     ws.reset();
-    assert.match(ws.read('sdk-slots/gen/PriceTag.jsx'), /@acme\/core\/original\/PriceTag/);
+    assert.match(ws.read('.stunt-double/gen/PriceTag.jsx'), /@acme\/core\/original\/PriceTag/);
     passes(vitest());
-    assert.match(ws.read('sdk-slots/gen/PriceTag.jsx'), /src\/overrides\/PriceTag\.tsx/);
+    assert.match(ws.read('.stunt-double/gen/PriceTag.jsx'), /src\/overrides\/PriceTag\.tsx/);
   });
 });
 
