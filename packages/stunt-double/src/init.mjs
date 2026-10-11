@@ -2,7 +2,8 @@
 // needs it. Every extra is opt-in by flag, idempotent, and prints each change; anything it cannot edit safely is
 // printed as a "! TODO" line instead.
 //
-//   --plugin     add stuntDouble() to the Vite config (after react(); order does not matter)
+//   --plugin     add stuntDouble() to the Vite config (after react(); order does not matter); Astro: into
+//                astro.config's vite.plugins; React Router: also point overridesDir / sourceDirs at app/
 //   --editor     contract errors in the editor and the project's own tsc: the check file goes into the app
 //                tsconfig "files", plus a "postinstall": "stunt-double gen --no-fail" so a fresh clone has the
 //                file before tsc runs (never TS6053)
@@ -13,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { generate, DEFAULT_OUT_DIR, CHECK_FILE } from './core/generate.mjs';
 import { formatProblems } from './core/diagnostics.mjs';
-import { detectPackageManager } from './core/config.mjs';
+import { detectPackageManager, DEFAULTS, CONFIG_FILE, PACKAGE_KEY } from './core/config.mjs';
 import { readTsconfig } from './core/tsconfig.mjs';
 import { gitignoreFor } from './core/emit.mjs';
 import { readJson, parseJsonc, posix, fileExists } from './core/util.mjs';
@@ -23,6 +24,7 @@ export const UNIVERSAL_DIR = 'sdk-slots';
 
 export const TOOL_CONFIGS = [
   { tool: 'vite', re: /^vite(st)?\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/vite', hint: "plugins: [react(), stuntDouble()]  (import { stuntDouble } from 'stunt-double/vite')" },
+  { tool: 'astro', re: /^astro\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/vite', hint: "vite: { plugins: [stuntDouble()] }  (import { stuntDouble } from 'stunt-double/vite'; Astro has no top-level plugins)" },
   { tool: 'next', re: /^next\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/next', hint: "export default withStuntDouble(nextConfig)  (import { withStuntDouble } from 'stunt-double/next')" },
   { tool: 'webpack', re: /^(webpack|rspack|rsbuild|craco)\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/webpack', hint: "export default withStuntDouble(config)  (import { withStuntDouble } from 'stunt-double/webpack')" },
   { tool: 'jest', re: /^jest\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double/jest', hint: "export default withStuntDouble(config)  (import { withStuntDouble } from 'stunt-double/jest')" },
@@ -68,10 +70,61 @@ export function addVitePlugin(text) {
     const end = open + 1 + trimmed.length;
     next = text.slice(0, end) + (trimmed.endsWith(',') ? ' ' : ', ') + 'stuntDouble()' + text.slice(end);
   }
-  const imports = [...next.matchAll(/^import[^;]*?from\s*['"][^'"]+['"];?[ \t]*$/gm)];
+  return addAdapterImport(next);
+}
+
+/** `import { stuntDouble } from 'stunt-double/vite'` after the last import, matching quotes and semicolons. */
+function addAdapterImport(text) {
+  const imports = [...text.matchAll(/^import[^;]*?from\s*(['"])[^'"]+\1;?[ \t]*$/gm)];
   const ip = imports.length ? imports.at(-1).index + imports.at(-1)[0].length : 0;
   const semi = imports.length ? (/;\s*$/.test(imports.at(-1)[0]) ? ';' : '') : ';';
-  return next.slice(0, ip) + `${ip ? '\n' : ''}import { stuntDouble } from 'stunt-double/vite'${semi}${ip ? '' : '\n'}` + next.slice(ip);
+  const q = imports.length ? imports.at(-1)[1] : "'";
+  return text.slice(0, ip) + `${ip ? '\n' : ''}import { stuntDouble } from ${q}stunt-double/vite${q}${semi}${ip ? '' : '\n'}` + text.slice(ip);
+}
+
+/**
+ * astro.config.*: Astro has no top-level `plugins`; the Vite plugin goes into `vite: { plugins: [...] }`
+ * (an existing vite block or plugins array is extended). Returns null when there is no config object to extend.
+ */
+export function addAstroPlugin(text) {
+  const vite = /\bvite\s*:\s*\{/.exec(text);
+  let next;
+  if (vite) {
+    const open = vite.index + vite[0].length - 1;
+    const close = matching(text, open);
+    if (close < 0) return null;
+    const pl = /\bplugins\s*:\s*\[/.exec(text.slice(open, close));
+    if (pl) {
+      const at = open + pl.index + pl[0].length;
+      const empty = /^\s*\]/.test(text.slice(at));
+      next = text.slice(0, at) + (empty ? 'stuntDouble()' : 'stuntDouble(), ') + text.slice(at);
+    } else next = text.slice(0, open + 1) + ' plugins: [stuntDouble()],' + text.slice(open + 1);
+  } else {
+    const m = /(defineConfig\(\s*\{|export\s+default\s+\{)/.exec(text);
+    if (!m) return null;
+    const at = m.index + m[0].length;
+    const close = matching(text, at - 1);
+    const empty = close > 0 && !text.slice(at, close).trim();
+    next = text.slice(0, at) + `\n  vite: { plugins: [stuntDouble()] },${empty ? '\n' : ''}` + text.slice(at);
+  }
+  return addAdapterImport(next);
+}
+
+/** React Router 7/8 framework mode / Remix keep application code in app/ (react-router.config appDirectory). */
+export function appDirectory(root, pkg) {
+  const deps = { ...pkg?.dependencies, ...pkg?.devDependencies };
+  const rr = fs.readdirSync(root).find((f) => /^react-router\.config\.(m|c)?[jt]s$/.test(f));
+  if (!rr && !deps['@react-router/dev'] && !deps['@remix-run/dev']) return null;
+  const text = rr ? fs.readFileSync(path.join(root, rr), 'utf8').replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/[^\n]*/g, '$1') : '';
+  return (/appDirectory\s*:\s*['"`]([^'"`]+)['"`]/.exec(text)?.[1] ?? 'app').replace(/^\.\//, '').replace(/\/$/, '');
+}
+
+/** Installed in node_modules of the project or an ancestor (a workspace root)? NODE_PATH / globals do not count. */
+function installedUpwards(name, root) {
+  for (let d = root; ; d = path.dirname(d)) {
+    if (fileExists(path.join(d, 'node_modules', name, 'package.json'))) return true;
+    if (path.dirname(d) === d) return false;
+  }
 }
 
 function insertAfter(text, re, insertion) {
@@ -124,6 +177,18 @@ function addScript(pkg, name, cmd, done, todo) {
   todo.push(`add a script running "${cmd}" to package.json`);
 }
 
+/** Framework layout and tooling the default setup needs but cannot see by itself (printed by `init`). */
+function setupGaps(root, p) {
+  const gaps = [];
+  const pkg = readJson(path.join(root, 'package.json')) ?? {};
+  const app = appDirectory(root, pkg);
+  if (app && p?.cfg && p.cfg.overridesDir === DEFAULTS.overridesDir && !fs.existsSync(path.join(root, DEFAULTS.overridesDir)))
+    gaps.push(`React Router keeps code in ${app}/: set "overridesDir": "${app}/overrides" and "sourceDirs": ["${app}"] in ${CONFIG_FILE} (or: npx stunt-double init --plugin), or overrides are looked for in ${DEFAULTS.overridesDir}/ and bypass imports in ${app}/ go unchecked`);
+  const ts = p?.cfg?.typescript ?? 'typescript';
+  if (!installedUpwards(ts, root)) gaps.push(`"${ts}" is not installed: the build's contract check runs tsc and fails with [SETUP] without it (npm i -D ${ts === 'typescript' ? 'typescript' : `${ts}@npm:typescript@5.9`})`);
+  return gaps;
+}
+
 /** Status of the default setup, for `init` without flags. */
 function status(root, p, out) {
   const configs = fs.readdirSync(root).filter((f) => TOOL_CONFIGS.some((t) => t.re.test(f)));
@@ -131,8 +196,9 @@ function status(root, p, out) {
   for (const f of configs) {
     const t = TOOL_CONFIGS.find((x) => x.re.test(f));
     const has = fs.readFileSync(path.join(root, f), 'utf8').includes('stunt-double');
-    out(has ? `  ok  ${f} uses ${t.adapter}` : `  !   ${f} does not use ${t.adapter}: ${t.hint}${t.tool === 'vite' ? ' (or: npx stunt-double init --plugin)' : ''}`);
+    out(has ? `  ok  ${f} uses ${t.adapter}` : `  !   ${f} does not use ${t.adapter}: ${t.hint}${t.tool === 'vite' || t.tool === 'astro' ? ' (or: npx stunt-double init --plugin)' : ''}`);
   }
+  for (const line of setupGaps(root, p)) out(`  !   ${line}`);
   if (p?.sdk) {
     const n = Object.values(p.table).filter((e) => e.impl?.source === 'app').length;
     out(fs.existsSync(p.overridesDir) ? `  ok  ${p.rel(p.overridesDir)}/: ${n} of ${p.slots.length} slots of ${p.sdk.name}@${p.sdk.version} overridden` : `  -   ${p.rel(p.overridesDir)}/ does not exist yet: every slot renders the ${p.sdk.name} default`);
@@ -155,7 +221,7 @@ export async function cmdInit(a, { out, err }) {
     const sdkSlots = p0.sdk?.slotPackage ?? '<sdk>-slots';
     const checkRel = p0.tsconfig ? posix(path.relative(root, path.join(root, DEFAULT_OUT_DIR, CHECK_FILE))) : `${DEFAULT_OUT_DIR}/${CHECK_FILE}`;
     out(`Optional extras (add any by flag; safe to re-run):`);
-    out(`  --plugin     add stuntDouble() to the Vite config`);
+    out(`  --plugin     add stuntDouble() to the Vite config (Astro: vite.plugins; React Router: also overridesDir/sourceDirs for app/)`);
     out(`  --editor     contract errors in your editor and tsc: adds ${p0.tier === 'universal' ? `${UNIVERSAL_DIR}/${CHECK_FILE}` : checkRel} to ${p0.tsconfigRel ?? 'tsconfig.json'} "files", and "postinstall": "stunt-double gen --no-fail" so a fresh clone has it before tsc runs`);
     out(`  --ci         add "check": "stunt-double check" to package.json scripts (run it in CI before the build)`);
     out(`  --universal  tools without a stunt-double adapter: link ${sdkSlots} to a committed ./${UNIVERSAL_DIR} stub (generated files move there); prefix those tools' scripts with "stunt-double check &&"`);
@@ -213,6 +279,14 @@ export async function cmdInit(a, { out, err }) {
       if (r.todo) todo.push(r.todo);
     }
     addScript(pkg, 'postinstall', 'stunt-double gen --no-fail', done, todo);
+    // `tsc -b && vite build` (Vite template), `react-router typegen && tsc`: tsc now reads the check file but runs
+    // before any adapter regenerates it, so after an edit it would report a stale file (TS6053 / TS2578) or raw
+    // check-file TS2322 lines instead of [F1]. `stunt-double check` regenerates and reports first.
+    for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
+      if (name === 'postinstall' || /stunt-double/.test(script) || !/(^|&&|;|\|\|)\s*(npx\s+)?(tsc|vue-tsc|tsgo)(\s|$)/.test(script)) continue;
+      pkg.scripts[name] = `stunt-double check && ${script}`;
+      done.push(`package.json script ${name}: ${pkg.scripts[name]}`);
+    }
     pkgChanged = true;
   } else if (want.has('universal') && p0.tsconfig) {
     // keep an existing editor opt-in pointing at the one generated location
@@ -237,10 +311,25 @@ export async function cmdInit(a, { out, err }) {
       const file = path.join(root, f);
       const text = fs.readFileSync(file, 'utf8');
       if (text.includes('stunt-double')) continue;
-      const next = t.tool === 'vite' ? addVitePlugin(text) : null;
-      if (next) { fs.writeFileSync(file, next); done.push(`${f}: added stuntDouble() to plugins`); } else todo.push(`${f}: ${t.hint}`);
+      const next = t.tool === 'vite' ? addVitePlugin(text) : t.tool === 'astro' ? addAstroPlugin(text) : null;
+      if (next) { fs.writeFileSync(file, next); done.push(`${f}: added stuntDouble() to ${t.tool === 'astro' ? 'vite.plugins' : 'plugins'}`); } else todo.push(`${f}: ${t.hint}`);
     }
     if (!found) todo.push(`no tool config found: add the stunt-double adapter to the tool that builds your app`);
+    // React Router / Remix: overrides and the bypass scan follow the app directory, not src/
+    const app = appDirectory(root, pkg);
+    if (app && p0.cfg.overridesDir === DEFAULTS.overridesDir && !fs.existsSync(path.join(root, DEFAULTS.overridesDir))) {
+      const cfgFile = path.join(root, CONFIG_FILE);
+      const cur = fs.existsSync(cfgFile) ? readJson(cfgFile) : null;
+      if (fs.existsSync(cfgFile) && !cur) todo.push(`${CONFIG_FILE} is not plain JSON: add "overridesDir": "${app}/overrides" and "sourceDirs": ["${app}"] by hand`);
+      else if (pkg[PACKAGE_KEY]) todo.push(`add "overridesDir": "${app}/overrides" and "sourceDirs": ["${app}"] to package.json "${PACKAGE_KEY}"`);
+      else {
+        const schema = fs.existsSync(path.join(sdk.dir, 'stunt-double.schema.json')) ? { $schema: `./node_modules/${sdk.name}/stunt-double.schema.json` } : {};
+        fs.writeFileSync(cfgFile, JSON.stringify({ ...schema, ...cur, overridesDir: `${app}/overrides`, sourceDirs: [app] }, null, 2) + '\n');
+        done.push(`${CONFIG_FILE}: "overridesDir": "${app}/overrides", "sourceDirs": ["${app}"] (React Router keeps code in ${app}/)`);
+      }
+    }
+    const ts = p0.cfg.typescript ?? 'typescript';
+    if (!installedUpwards(ts, root)) todo.push(`npm i -D ${ts === 'typescript' ? 'typescript' : `${ts}@npm:typescript@5.9`}: the build's contract check runs tsc and fails with [SETUP] without it`);
   }
 
   // generate now, so the editor opt-in never sees a missing file and the result is visible immediately
