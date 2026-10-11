@@ -18,6 +18,7 @@
 //                 through compilation.errors (the type gate runs in runAfterProductionCompile for both bundlers).
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, webpackGraph } from '../core/audit.mjs';
@@ -98,6 +99,7 @@ function wrapUnsafe(nextConfig, opts, dev) {
     turbopack: {
       ...nextConfig.turbopack,
       resolveAlias: { ...nextConfig.turbopack?.resolveAlias, [`${slotPkg}/*`]: `${rel}/*.jsx` },
+      rules: devValidationRule(nextConfig.turbopack?.rules, p, genOpts),
     },
     compiler: {
       ...nextConfig.compiler,
@@ -185,6 +187,20 @@ function watchDirs(root, onEvent, { recurse = true, only = null } = {}) {
     }
   };
   scan();
+}
+
+// Turbopack dev: validate INSIDE the compilation of override files (and the files they import), so a save that
+// introduces a mistake fails that module's compile before it can run (an F7 self-render would otherwise hang the
+// dev server in the moment between Turbopack's recompile and the watcher's poison). See next-loader.cjs.
+const SOURCE_GLOB = '*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}';
+const LOADER = fileURLToPath(new URL('./next-loader.cjs', import.meta.url));
+function devValidationRule(userRules = {}, p, genOpts) {
+  const rule = {
+    condition: { all: ['development', { not: { path: /[\\/]node_modules[\\/]/ } }] },
+    loaders: [{ loader: LOADER, options: { ...genOpts, root: p.root } }],
+  };
+  const prev = userRules[SOURCE_GLOB];
+  return { ...userRules, [SOURCE_GLOB]: prev ? [...[].concat(prev), rule] : [rule] };
 }
 
 // The piece of stunt-double/webpack that Next needs (no type gate: next build type-checks the check file).

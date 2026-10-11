@@ -34,7 +34,7 @@ here. An unknown option is a `[CFG]` error.
 | When | What |
 |---|---|
 | Config load (`next build`, `next dev`) | Validates the overrides and writes the shims. **Any injection mistake throws**, so the command exits 1 before compiling |
-| `next dev` | Watches `src/overrides` and the config: adding, removing or swapping an override rewrites a shim, which the dev server picks up; a mistake turns the shims into an error the dev server shows |
+| `next dev` | Watches `src/overrides` and the config: adding, removing or swapping an override rewrites a shim, which the dev server picks up; a mistake turns the shims into an error the dev server shows. Under Turbopack a dev-only loader also re-validates each override file, and every file it imports (helpers added later too), as Turbopack compiles it, so a save that makes an override render itself fails that module instead of hanging the dev server |
 | `transpilePackages` | Adds the SDK, brand layers and the slot package. Without it the Pages Router would load them natively in Node, where slots cannot be redirected (with the registry placeholder installed, `next build --webpack` would load it and fail) |
 | Turbopack | One `turbopack.resolveAlias` entry: `'@acme/core-slots/*': './.stunt-double/gen/*.jsx'`. The target is relative on purpose: Turbopack silently ignores absolute targets |
 | webpack (`--webpack`) | Exact aliases to the shims, `exportsPresence: 'error'`, the decision fingerprint folded into the persistent cache version, and a post-bundle audit (bypassed sockets, duplicate SDK) reported as a build error |

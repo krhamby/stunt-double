@@ -412,7 +412,7 @@ describe('next dev', () => {
     });
   }
 
-  test('next dev: editor-style atomic saves (write temp + rename) are seen: F7 -> HTTP 500, F1 -> terminal, both recover', async () => {
+  test('next dev: editor-style atomic saves (write temp + rename): F7 (direct and via a helper) -> HTTP 500 without hanging, F1 -> terminal, all recover', async () => {
     // Node 22's recursive fs.watch on Linux loses a file once it is renamed over; the adapter watches directories.
     const app = copyApp('dev-atomic');
     const port = freePort();
@@ -434,9 +434,21 @@ describe('next dev', () => {
       atomic(orig + '\n// touched\n');
       await step('no-op atomic save', has('BRAND_PRICE'));
       atomic("import { PriceTag as P } from '@acme/core';\nimport type { SlotProps } from '@acme/core/contracts';\nexport function PriceTag(props: SlotProps['PriceTag']) { return <P {...props} />; }\n");
-      await step('F7 by atomic save -> HTTP 500 with the poison text', (r) => r.status === 500 && /STUNT-DOUBLE-ERROR -- \[F7\]/.test(r.text));
+      // straight after the previous save: Turbopack recompiles at once; the dev loader must fail the module first
+      const f7 = (r) => r.status === 500 && /\[F7\][^<]{0,40}src[ /]overrides[ /]PriceTag\.tsx/.test(r.text);
+      await step('F7 by atomic save -> HTTP 500 with the [F7] report (no hang)', f7);
       atomic(orig);
       await step('fixed by atomic save', has('BRAND_PRICE'));
+      // a helper OUTSIDE src/overrides that the override starts using, later edited to render the slot itself
+      app.write('src/components/Fancy.tsx', 'export function Fancy({ amount }: { amount: number }) { return <i data-sd="BRAND_PRICE">{amount}</i>; }\n');
+      atomic("import type { SlotProps } from '@acme/core/contracts';\nimport { Fancy } from '../components/Fancy';\nexport function PriceTag(props: SlotProps['PriceTag']) { return <Fancy amount={props.amount} />; }\n");
+      await step('override uses a new helper', has('BRAND_PRICE'));
+      const H = 'src/components/Fancy.tsx';
+      app.write(H + '.tmp', "import { PriceTag } from '@acme/core';\nexport function Fancy({ amount }: { amount: number }) { return <i><PriceTag amount={amount} /></i>; }\n");
+      fs.renameSync(app.file(H + '.tmp'), app.file(H));
+      await step('helper edited to render the slot -> HTTP 500 with the [F7] report (no hang)', (r) => r.status === 500 && /\[F7\][^<]{0,80}Fancy\.tsx/.test(r.text));
+      atomic(orig);
+      await step('override no longer uses the helper', has('BRAND_PRICE'));
       atomic(orig.replace("{ amount, currency = 'USD' }: SlotProps['PriceTag']", '{ amount }: { amount: number }'));
       await logHas('F1 by atomic save -> printed in the terminal', /\[F1\] PriceTag \(src\/overrides\/PriceTag\.tsx\): override ignores these SDK props: "currency"/);
       atomic(orig);
