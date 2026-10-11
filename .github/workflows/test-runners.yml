@@ -1,5 +1,6 @@
-# The test-runner group: Jest, Vitest (beyond the reference vite suite), Storybook (builder-vite and
-# builder-webpack5) and Metro. One job per suite; each is a defineToolSuite() in tests/<suite>.test.mjs.
+# The test-runner group: Jest, Vitest (beyond the reference vite suite), Storybook (builder-vite with the
+# inherited plugin, builder-vite with viteFinal, builder-webpack5) and Metro. Each suite is one
+# defineToolSuite() in tests/<suite>.test.mjs (see tests/README.md).
 name: test-runners
 on:
   push:
@@ -11,23 +12,33 @@ concurrency:
   cancel-in-progress: true
 jobs:
   suite:
-    name: ${{ matrix.suite }} suite
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        suite: [jest, vitest, storybook, metro]
+        include:
+          - name: jest suite
+            suites: jest
+          - name: vitest suite
+            suites: vitest
+            chromium: npx -y playwright@1.64.0 install --with-deps chromium        # Vitest browser mode
+          - name: storybook suites
+            suites: storybook-vite storybook-vite-final storybook-webpack
+            chromium: npx -y playwright-core@1.56.1 install --with-deps chromium   # the probes' playwright-core
+          - name: metro suite
+            suites: metro
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup     # Node 22 + npm cache + npm ci + npm run setup
-      - name: Chromium for Vitest browser mode
-        if: matrix.suite == 'vitest'
-        run: npx -y playwright@1.64.0 install --with-deps chromium
-      - run: npm test -- ${{ matrix.suite }}
+      - name: Chromium
+        if: matrix.chromium
+        run: ${{ matrix.chromium }}
+      - run: npm test -- ${{ matrix.suites }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.suite }}-results
+          name: ${{ matrix.suites == 'jest' && 'jest' || matrix.suites == 'vitest' && 'vitest' || matrix.suites == 'metro' && 'metro' || 'storybook' }}-results
           path: /tmp/stunt-double-tests/*/results.json
           if-no-files-found: ignore
