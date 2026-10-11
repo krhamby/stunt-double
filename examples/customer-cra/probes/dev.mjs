@@ -21,8 +21,8 @@ const SCENARIO = [
   { label: 'initial render', expect: { overlay: null, sdkHas: ['BRAND_PRICE', 'BRAND_LOGO'], appHas: ['BRAND_BUTTON(dark)'] } },
   { label: 'F2a typo Button.tsx -> Buton.tsx', edit: () => fs.renameSync(ov('Button.tsx'), ov('Buton.tsx')), expect: { overlay: '[F2] src/overrides/Buton.tsx overrides unknown slot "Buton"' } },
   { label: 'fix the typo', edit: () => fs.renameSync(ov('Buton.tsx'), ov('Button.tsx')), expect: { overlay: null, appHas: ['BRAND_BUTTON(dark)'] }, settle: 8_000 },
-  { label: 'remove the PriceTag override', edit: () => fs.renameSync(ov('PriceTag.tsx'), path.join(root, 'PriceTag.tsx.off')), expect: { overlay: null, sdkHas: ['SDK_DEFAULT_PRICETAG'], sdkLacks: ['BRAND_PRICE'] } },
-  { label: 'add the PriceTag override back', edit: () => fs.renameSync(path.join(root, 'PriceTag.tsx.off'), ov('PriceTag.tsx')), expect: { overlay: null, sdkHas: ['BRAND_PRICE'], sdkLacks: ['SDK_DEFAULT_PRICETAG'] } },
+  { label: 'remove the PriceTag override', edit: () => fs.renameSync(ov('PriceTag.tsx'), path.join(root, 'PriceTag.tsx.off')), expect: { overlay: null, sdkHas: ['SDK_DEFAULT_PRICETAG'], sdkLacks: ['BRAND_PRICE'] }, settle: 8_000 },
+  { label: 'add the PriceTag override back', edit: () => fs.renameSync(path.join(root, 'PriceTag.tsx.off'), ov('PriceTag.tsx')), expect: { overlay: null, sdkHas: ['BRAND_PRICE'], sdkLacks: ['SDK_DEFAULT_PRICETAG'] }, settle: 8_000 },
   { label: 'F1a extra required prop', edit: () => edit(ov('Button.tsx'), (s) => s.replace("props: SlotProps['Button'])", "props: SlotProps['Button'] & { tone: 'loud' })")), expect: { overlay: '[F1] Button (src/overrides/Button.tsx): TS2322' } },
   { label: 'fix the prop', edit: () => edit(ov('Button.tsx'), (s) => s.replace(" & { tone: 'loud' })", ')')), expect: { overlay: null, appHas: ['BRAND_BUTTON(dark)'] }, settle: 8_000 },
 ];

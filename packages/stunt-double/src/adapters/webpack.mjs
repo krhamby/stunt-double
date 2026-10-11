@@ -13,6 +13,7 @@
 //
 // Never resolve.plugins (Rspack silently ignores it), never module replacement in afterResolve (loaders were
 // already chosen for the old path), never fork-ts-checker with TypeScript 7 (it crashes and the build passes).
+import fs from 'node:fs';
 import path from 'node:path';
 import { generate, regenerate } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
@@ -114,6 +115,7 @@ export class StuntDoublePlugin {
       const changed = this.p.changedFiles;
       if (changed.length) invalidate(c, changed);
       if (changed.length || this.p.problems.join() !== prev.problems.join() || touches(this.p, c)) gateDirty = true;
+      announceRemovals(c, this.p.overridesDir);
     });
 
     compiler.hooks.thisCompilation.tap(NAME, (compilation) => {
@@ -155,6 +157,20 @@ function touches(p, compiler) {
   const files = [...(compiler.modifiedFiles ?? []), ...(compiler.removedFiles ?? [])];
   if (!compiler.modifiedFiles) return true;
   return files.some((f) => f === p.checkFile || p.closureFiles.has(f) || isInside(f, p.overridesDir) || isInside(f, p.genDir));
+}
+
+/**
+ * Inside a watched context directory (the overrides dir) watchpack reports a deleted file as 'remove' followed
+ * by 'change' with no mtime. fork-ts-checker 6 (CRA's dev type checker) ignores the mtime and records a change,
+ * so TypeScript never sees the delete and, once the file is back, keeps a stale TS2307 for it (e.g. in
+ * src/stunt-double.check.ts after a rename and its fix). Re-announce real removals; only 'remove' listeners
+ * see this (webpack and webpack-dev-server listen for 'change').
+ */
+function announceRemovals(compiler, dir) {
+  const watcher = compiler.watchFileSystem?.watcher ?? compiler.watchFileSystem?.wfs?.watcher;
+  if (typeof watcher?.emit !== 'function') return;
+  for (const f of new Set([...(compiler.modifiedFiles ?? []), ...(compiler.removedFiles ?? [])]))
+    if (isInside(f, dir) && !fs.existsSync(f)) watcher.emit('remove', f, 'rename');
 }
 
 /**
