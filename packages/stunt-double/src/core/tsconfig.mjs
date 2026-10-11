@@ -71,21 +71,25 @@ export function tsconfigCovers(tsconfigFile, absFile) {
 }
 
 /**
- * Pick the tsconfig that owns the check file. Explicit config wins. A solution-style tsconfig.json
- * (`files: []` + references, the Vite template) delegates to the first referenced config covering the file.
+ * Pick the app tsconfig: the one whose program owns the overrides. The type gate's tsconfig extends it, and
+ * `init --editor` adds the check file to it. Explicit config wins. A solution-style tsconfig.json (`files: []` +
+ * references, as in the Vite templates) delegates to the first referenced config covering the overrides dir.
  */
-export function pickAppTsconfig(root, explicit, checkFile) {
+export function pickAppTsconfig(root, explicit, overridesDir) {
   if (explicit) return path.resolve(root, explicit);
   const main = path.join(root, 'tsconfig.json');
   if (!fileExists(main)) return null;
   const t = readTsconfig(main);
   const solution = t && t.references.length && Array.isArray(t.json.files) && t.json.files.length === 0 && !t.json.include;
   if (!solution) return main;
-  for (const ref of t.references) {
+  const probe = path.join(overridesDir, '__stunt_double_probe__.tsx');
+  const refs = t.references.map((ref) => {
     let f = path.resolve(root, ref.path);
     if (dirExists(f)) f = path.join(f, 'tsconfig.json');
-    if (fileExists(f) && tsconfigCovers(f, checkFile)) return f;
-  }
+    return f;
+  }).filter(fileExists);
+  const owner = refs.find((f) => tsconfigCovers(f, probe));
+  if (owner) return owner;
   const app = path.join(root, 'tsconfig.app.json');
-  return fileExists(app) ? app : main;
+  return fileExists(app) ? app : refs[0] ?? main;
 }

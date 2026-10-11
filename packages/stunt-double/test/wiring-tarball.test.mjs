@@ -16,13 +16,13 @@ function project(spec) {
 test('file:<tarball> of the slot package is not a link declaration', () => {
   for (const spec of ['file:../../.packs/acme-core-slots-0.0.1.tgz', 'file:./vendor/acme-core-slots-0.0.1.tar.gz', 'file:x.tar']) {
     const root = project(spec);
-    assert.equal(linkDeclaration(root, '@acme/core-slots', path.join(root, 'sdk-slots')), null, spec);
+    assert.equal(linkDeclaration(root, '@acme/core-slots'), null, spec);
   }
 });
 
-test('file:<directory> and other forms are still declarations', () => {
+test('file:<directory> is still a link declaration; a registry range is not', () => {
   const root = project('file:./sdk-slots');
-  assert.deepEqual(linkDeclaration(root, '@acme/core-slots', path.join(root, 'sdk-slots')), { field: 'dependencies', spec: 'file:./sdk-slots', linkForm: true });
+  assert.deepEqual(linkDeclaration(root, '@acme/core-slots'), { field: 'dependencies', spec: 'file:./sdk-slots', linkForm: true, dir: path.join(root, 'sdk-slots') });
   const reg = project('^0.0.1');
-  assert.equal(linkDeclaration(reg, '@acme/core-slots', path.join(reg, 'sdk-slots')).linkForm, false);
+  assert.equal(linkDeclaration(reg, '@acme/core-slots'), null);
 });

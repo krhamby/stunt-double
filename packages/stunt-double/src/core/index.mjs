@@ -1,10 +1,11 @@
 // stunt-double/core: the pure core every adapter wraps. Public, documented API (see index.d.ts).
-export { generate, regenerate, StuntDoubleError } from './generate.mjs';
+export { generate, regenerate, StuntDoubleError, DEFAULT_OUT_DIR, CHECK_FILE, CHECK_TSCONFIG } from './generate.mjs';
 export { runTypeGate, resolveTypeScript, writeCheckTsconfig } from './typegate.mjs';
 export { auditGraph, rollupGraph, webpackGraph, esbuildGraph } from './audit.mjs';
-export { formatProblems, formatWarnings, mapDiagnostics, parseTscOutput, header } from './diagnostics.mjs';
+export { formatProblems, formatWarnings, formatReport, docsUrl, docsFooter, DOCS_BASE, mapDiagnostics, parseTscOutput, header } from './diagnostics.mjs';
 export { watchProject } from './watch.mjs';
 export { sdkLint, abiOf, contractSlots, schemaFor } from './sdklint.mjs';
+export { rewriteSocketDts, rewriteDtsFile, socketMentions, publishedDtsFiles, contractsDts } from './sdkdts.mjs';
 export { loadConfig, DEFAULTS, CONFIG_FILE, PACKAGE_KEY, detectPackageManager, detectPnP, detectRsc } from './config.mjs';
 export { loadSdk, loadLayers, detectSdk, TOOL_VERSION, MANIFEST_FILE } from './manifest.mjs';
 export { scanOverrides, unknownSlotMessage } from './scan.mjs';
@@ -15,7 +16,7 @@ export { checkWiring, linkDeclaration } from './wiring.mjs';
 export { checkSingletons } from './singletons.mjs';
 export { scanBypass } from './bypass.mjs';
 export { renderCheckFile } from './checkfile.mjs';
-export { emitAll, emitPoison, shimFor } from './emit.mjs';
+export { emitAll, emitPoison, shimFor, gitignoreFor, OUT_DIR_ENTRIES } from './emit.mjs';
 export { pickAppTsconfig, tsconfigCovers, readTsconfig } from './tsconfig.mjs';
 export { parseModule, parseSource, readDirective } from './parse.mjs';
 export { esc, poisonText, nearest, lev, globToRegExp, parseJsonc } from './util.mjs';

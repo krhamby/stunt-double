@@ -1,31 +1,65 @@
-// Link self-test (F6f / F8b): when the project declares a link dependency on the slot package, the SDK must
-// resolve exactly the project's slots directory - not a copy (pnpm/Bun file:), not the registry placeholder,
-// not another app's slot package (npm-hoisted monorepos), not a Yarn PnP __virtual__ instance.
+// The universal tier (T0): the project declares a LINK dependency on the slot package (npm "file:", pnpm
+// "link:", Yarn "portal:", Bun "workspace:*" / npm workspaces) to a committed stub directory. That directory is
+// then the project's ONE generated location (outDir), because a package's exports cannot point outside it.
+//
+// Link self-test (F6f / F8b): with a link declared, the SDK must resolve exactly that directory - not a copy
+// (pnpm/Bun file:), not the registry placeholder, not another app's slot package (npm-hoisted monorepos), not a
+// Yarn PnP __virtual__ instance. Without a link (the default adapter tier) there is nothing to test: tools
+// without an adapter resolve the registry placeholder and fail at resolve time, by design.
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { readJson, real, findPackageJson } from './util.mjs';
+import { readJson, real, findPackageJson, isInside } from './util.mjs';
 
 const LINK_FORMS = /^(file:|link:|portal:|workspace:)/;
 // "file:<tarball>" installs a packed copy (e.g. the registry placeholder from a local .tgz): not a link.
 const TARBALL = /\.(tgz|tar\.gz|tar)$/i;
 
-/** Is the slot package declared as a dependency of the project (universal tier)? */
-export function linkDeclaration(root, slotPackage, slotsDir) {
+function workspaceDirs(root, pkg) {
+  const ws = Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces?.packages ?? [];
+  const dirs = [];
+  for (const w of ws) {
+    const pat = String(w).replace(/^\.\//, '').replace(/\/$/, '');
+    if (!pat.includes('*')) { dirs.push(path.resolve(root, pat)); continue; }
+    const m = /^(.*?)\/?\*$/.exec(pat); // "packages/*" (the common form); deeper globs are not needed here
+    if (!m) continue;
+    const base = path.resolve(root, m[1]);
+    let ents = [];
+    try { ents = fs.readdirSync(base, { withFileTypes: true }); } catch {}
+    for (const e of ents) if (e.isDirectory()) dirs.push(path.join(base, e.name));
+  }
+  return dirs;
+}
+
+/**
+ * Is the slot package LINKED into the project (universal tier)? Returns { field, spec, linkForm, dir } where
+ * `dir` is the linked directory (absolute; null for a "workspace:" line whose workspace is not found), or null
+ * when no link dependency is declared. A registry range (the placeholder) is not a link: adapter tier.
+ */
+export function linkDeclaration(root, slotPackage) {
   const pkg = readJson(path.join(root, 'package.json')) ?? {};
+  const named = (d) => readJson(path.join(d, 'package.json'))?.name === slotPackage;
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
     const spec = pkg[field]?.[slotPackage];
-    if (spec && spec.startsWith('file:') && TARBALL.test(spec)) return null; // the placeholder from a tarball: adapter-only project
-    if (spec) return { field, spec, linkForm: LINK_FORMS.test(spec) };
+    if (typeof spec === 'string' && spec.startsWith('file:') && TARBALL.test(spec)) continue; // the placeholder from a tarball: not a link
+    if (typeof spec !== 'string' || !LINK_FORMS.test(spec)) continue;
+    if (spec.startsWith('workspace:')) return { field, spec, linkForm: true, dir: workspaceDirs(root, pkg).find(named) ?? null };
+    return { field, spec, linkForm: true, dir: path.resolve(root, spec.replace(LINK_FORMS, '')) };
   }
-  const ws = Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces?.packages ?? [];
-  const relSlots = path.relative(root, slotsDir).split(path.sep).join('/');
-  if (ws.some((w) => w.replace(/^\.\//, '').replace(/\/$/, '') === relSlots)) return { field: 'workspaces', spec: relSlots, linkForm: true };
+  const ws = workspaceDirs(root, pkg).find(named);
+  if (ws) return { field: 'workspaces', spec: path.relative(root, ws).split(path.sep).join('/'), linkForm: true, dir: ws };
   return null;
 }
 
-export function checkWiring({ root, sdk, slotsDir, rel, pm = 'npm' }) {
-  const decl = linkDeclaration(root, sdk.slotPackage, slotsDir);
-  if (!decl) return { problems: [], linkDeclared: false }; // adapter-only project: unwired tools hit the placeholder (fail-closed)
+/** @returns {{ problems: string[], linkDeclared: boolean }} */
+export function checkWiring({ root, sdk, decl, rel, pm = 'npm' }) {
+  if (!decl) return { problems: [], linkDeclared: false };
+  const slotsDir = decl.dir;
+  if (!slotsDir) return { linkDeclared: true, problems: [`[F6] "${sdk.slotPackage}": "${decl.spec}" names no workspace whose package.json is "${sdk.slotPackage}": add its directory to "workspaces".`] };
+  if (!isInside(slotsDir, root)) return { linkDeclared: true, problems: [`[F6] ${sdk.slotPackage} is linked to ${slotsDir}, outside the project: link a directory inside the project (npx stunt-double init --universal).`] };
+  const want = path.join(slotsDir, 'package.json');
+  if (!fs.existsSync(want))
+    return { linkDeclared: true, problems: [`[F6] ${rel(slotsDir)}/package.json, the committed stub of the linked ${sdk.slotPackage}, is missing: run npx stunt-double init --universal, then ${pm} install.`] };
   const fromSdk = createRequire(path.join(sdk.realDir, 'package.json'));
   let seen;
   try { seen = real(fromSdk.resolve(`${sdk.slotPackage}/package.json`)); } catch (e) {
@@ -35,8 +69,7 @@ export function checkWiring({ root, sdk, slotsDir, rel, pm = 'npm' }) {
   }
   if (seen.includes(`${path.sep}__virtual__${path.sep}`))
     return { linkDeclared: true, problems: [`[F8] ${sdk.slotPackage} is a Yarn PnP __virtual__ instance because ${rel(slotsDir)}/package.json declares peerDependencies: remove them (shims would load second copies of your modules).`] };
-  const want = real(path.join(slotsDir, 'package.json'));
-  if (seen !== want) {
+  if (seen !== real(want)) {
     const what = readJson(seen)?.stuntDouble?.placeholder
       ? 'the registry placeholder: the link is missing or was replaced by an auto-installed peer'
       : "a copy, or another app's slot package";

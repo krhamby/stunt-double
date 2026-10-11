@@ -6,10 +6,12 @@ export interface StuntDoubleConfig {
   sdk?: string | null;
   /** Default "src/overrides". One file per overridden slot: <Slot>.tsx or <Slot>/index.tsx. */
   overridesDir?: string;
-  /** Default "sdk-slots": the linkable package (committed package.json stub, generated gen/). */
-  slotsDir?: string;
-  /** Default "src/stunt-double.check.ts" (generated, gitignored, listed in tsconfig "files"). */
-  checkFile?: string;
+  /**
+   * The ONE generated directory: gen/<Slot>.jsx|.d.ts shims, check.ts, tsconfig.check.json, state. It ignores
+   * itself in git. Default ".stunt-double"; in the universal tier (a link dependency on the slot package) it is
+   * the linked stub's directory (e.g. "sdk-slots") and must not be set to anything else.
+   */
+  outDir?: string | null;
   /** App tsconfig. Default: tsconfig.json, or the referenced config of a solution-style tsconfig.json. */
   tsconfig?: string | null;
   /** Package NAME of the gate compiler. Default "typescript"; e.g. "typescript5" (npm alias of typescript@5.9). */
@@ -26,8 +28,8 @@ export interface StuntDoubleConfig {
   singletons?: string[];
   /** node_modules packages the F7 walk descends into. */
   scanPackages?: string[];
-  /** "error" (default) or "redirect" (degraded path, spec §10; not implemented yet). */
-  relativeEdges?: 'error' | 'redirect';
+  /** "error" (the default and only value in 0.1): SDK files importing their own defaults are [F6]. */
+  relativeEdges?: 'error';
   /** Directories scanned for '<sdk>/original/*' bypasses (F6g). Default ["src"]. */
   sourceDirs?: string[];
 }
@@ -126,15 +128,26 @@ export interface Project {
   /** posix path relative to the root */
   rel(file: string): string;
   overridesDir: string;
-  slotsDir: string;
+  /** the one generated directory (default <root>/.stunt-double) */
+  outDir: string;
+  /** <outDir>/gen: the shims */
   genDir: string;
+  /** <outDir>/check.ts */
   checkFile: string;
+  /** <outDir>/tsconfig.check.json: the type gate's tsconfig (extends the app tsconfig) */
+  checkTsconfig: string;
+  mapFile: string;
+  stateFile: string;
+  /** 'adapter' (default) or 'universal' (the slot package is linked to outDir) */
+  tier: 'adapter' | 'universal';
+  /** the universal tier's link dependency, or null */
+  link: { field: string; spec: string; linkForm: boolean; dir: string | null } | null;
   pm: string;
   isPnP: boolean;
   rsc: boolean;
   /** Injection errors ([F1]..[F9], [CFG], [SETUP], ...). Non-empty = the build must fail. */
   problems: string[];
-  /** Warnings ([W7], [X2]). Never fail the build. */
+  /** Warnings ([W7]). Never fail the build. */
   warnings: string[];
   /** Absolute paths written by this generation (only changed bytes are written). */
   changedFiles: string[];
@@ -158,6 +171,7 @@ export interface Project {
   implFiles: string[];
   tsconfig: string | null;
   tsconfigRel: string | null;
+  /** the app tsconfig's own program contains the check file (opt-in: `stunt-double init --editor`) */
   tsconfigCoversCheckFile: boolean;
   linkDeclared: boolean;
   /** hash of every decision; folded into persistent cache keys */
@@ -207,6 +221,17 @@ export declare function rollupGraph(ctx: { getModuleIds(): Iterable<string>; get
 export declare function webpackGraph(compilation: any, modules: Iterable<any>): GraphModule[];
 export declare function esbuildGraph(metafile: { inputs: Record<string, { imports?: Array<{ path: string; external?: boolean }> }> }, root: string): GraphModule[];
 
+export declare const DEFAULT_OUT_DIR: '.stunt-double';
+export declare const CHECK_FILE: 'check.ts';
+export declare const CHECK_TSCONFIG: 'tsconfig.check.json';
+/** Base URL of the docs that report footers link to. */
+export declare const DOCS_BASE: string;
+/** Reference URL for a message code ("F2", "SDK1", ...), or null. */
+export declare function docsUrl(code: string): string | null;
+/** One "see <url>" line per distinct code among the lines. */
+export declare function docsFooter(lines: string[]): string[];
+/** header + lines + docs footer, joined for printing. */
+export declare function formatReport(head: string, lines: string[]): string;
 export declare function formatProblems(p: Project | null, problems?: string[]): string;
 export declare function formatWarnings(p: Project | null, warnings?: string[]): string;
 export declare function header(p: Project | null, n: number, what?: string): string;
@@ -216,8 +241,17 @@ export declare function mapDiagnostics(p: Project, output: string, map: { file: 
 export declare function watchProject(p: Project, opts?: { onChange?: (next: Project | null, prev: Project, error?: unknown) => void; debounce?: number; onError?: 'poison' | 'return' }): { close(): void; readonly current: Project };
 
 export interface SdkLintResult { ok: boolean; errors: string[]; warnings: string[]; written: string[]; manifest?: SlotManifest; pkgDir?: string }
-/** The SDK publish gate. write: also writes consumers, the ABI pin and stunt-double.schema.json. */
-export declare function sdkLint(pkgDir?: string, opts?: { write?: boolean }): SdkLintResult;
+/**
+ * The SDK publish gate. fix: first point published .d.ts files at the originals instead of the socket package
+ * (rule SDK6). write: also writes consumers, the ABI pin and stunt-double.schema.json.
+ */
+export declare function sdkLint(pkgDir?: string, opts?: { write?: boolean; fix?: boolean }): SdkLintResult;
+/** Rewrite the SDK's published declarations so they never mention the socket package. */
+export declare function rewriteSocketDts(o: { pkgDir: string; pkg: any; manifest: SlotManifest }): { written: string[]; errors: string[] };
+export declare function rewriteDtsFile(o: { file: string; pkgDir: string; manifest: SlotManifest; contracts: string | null }): { text: string; changed: boolean; errors: string[] };
+export declare function socketMentions(file: string, slotPackage: string, src?: string): Array<{ spec: string; line: number }>;
+export declare function publishedDtsFiles(pkgDir: string, pkg: any): string[];
+export declare function contractsDts(pkgDir: string, pkg: any): string | null;
 export declare function abiOf(manifest: SlotManifest, contractsText: string, slotPackage: string, version: string): string;
 export declare function contractSlots(contractsDts: string): string[] | null;
 export declare function schemaFor(manifest: SlotManifest): object;
@@ -249,14 +283,17 @@ export declare function walkImplementation(o: {
 }): { errors: string[]; warnings: string[]; files: string[] };
 export declare function scanDist(o: any): { problems: string[]; edges: Array<{ file: string; spec: string; slot: string; how: string }>; socketConsumers: Record<string, string[]>; unknownSockets: Array<{ file: string; slot: string }>; files: string[]; directives: Record<string, string | null> };
 export declare function checkWiring(o: any): { problems: string[]; linkDeclared: boolean };
-export declare function linkDeclaration(root: string, slotPackage: string, slotsDir: string): { field: string; spec: string; linkForm: boolean } | null;
+export declare function linkDeclaration(root: string, slotPackage: string): { field: string; spec: string; linkForm: boolean; dir: string | null } | null;
 export declare function checkSingletons(o: any): string[];
 export declare function scanBypass(o: any): string[];
 export declare function renderCheckFile(o: any): { text: string; map: { file: string; lines: Record<number, { role: string; slot?: string; file?: string }> } };
 export declare function emitAll(p: Project, check: { text: string; map: object }): string[];
 export declare function emitPoison(p: Project, problems: string[]): string[];
 export declare function shimFor(p: Project, slot: string): { js: string; dts: string } | null;
-export declare function pickAppTsconfig(root: string, explicit: string | null | undefined, checkFile: string): string | null;
+export declare function gitignoreFor(p: Pick<Project, 'tier'>): string;
+export declare const OUT_DIR_ENTRIES: ReadonlySet<string>;
+/** The app tsconfig owning the overrides (solution-style aware). */
+export declare function pickAppTsconfig(root: string, explicit: string | null | undefined, overridesDir: string): string | null;
 export declare function tsconfigCovers(tsconfigFile: string, absFile: string): boolean;
 export declare function readTsconfig(file: string): any;
 export declare function parseModule(file: string): any;
