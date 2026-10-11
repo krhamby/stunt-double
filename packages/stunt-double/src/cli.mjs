@@ -210,7 +210,8 @@ const TOOL_CONFIGS = [
   { tool: 'metro', re: /^metro\.config\.(m|c)?js$/, adapter: 'stunt-double/metro', hint: "module.exports = withStuntDouble(getDefaultConfig(__dirname))  (require('stunt-double/metro'))" },
   { tool: 'rollup/rolldown', re: /^(rollup|rolldown)\.config\.(m|c)?[jt]s$/, adapter: 'stunt-double', hint: "plugins: [stuntDouble()]  (import { stuntDouble } from 'stunt-double/vite')" },
 ];
-const ADAPTERLESS = /(^|&&\s*|;\s*)(npx\s+)?(parcel|bun\s+build|esbuild|tsup|farm)\b/;
+// `bun build` is the CLI (cannot load plugins); `bun build.ts` runs a Bun.build() script (the adapter's home).
+const ADAPTERLESS = /(^|&&\s*|;\s*)(npx\s+)?(parcel|bun\s+build(?![\w./-])|esbuild|tsup|farm)\b/;
 
 async function cmdDoctor(a) {
   const errors = [];
