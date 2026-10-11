@@ -13,6 +13,7 @@
 //
 // Never resolve.plugins (Rspack silently ignores it), never module replacement in afterResolve (loaders were
 // already chosen for the old path), never fork-ts-checker with TypeScript 7 (it crashes and the build passes).
+import fs from 'node:fs';
 import path from 'node:path';
 import { generate, regenerate } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
@@ -90,6 +91,7 @@ export class StuntDoublePlugin {
     this.p = p;
     this.opts = opts;
     this.lastGate = null; // dev: the last type-gate result, re-reported until the next relevant change
+    this.seen = shimContents(p, new Map()); // shim contents this compiler last compiled against
   }
 
   apply(compiler) {
@@ -108,7 +110,9 @@ export class StuntDoublePlugin {
       watching = true;
       const prev = this.p;
       this.p = regenerate(prev, { onError: 'poison' });
-      const changed = this.p.changedFiles;
+      // Multi-compiler (webpack config arrays, Rsbuild environments): every compiler regenerates, but only the
+      // first one in a rebuild sees changedFiles. Compare with what THIS compiler last saw instead.
+      const changed = [...new Set([...this.p.changedFiles, ...shimChanges(this.p, this.seen)])];
       if (changed.length) invalidate(c, changed);
       if (changed.length || this.p.problems.join() !== prev.problems.join() || touches(this.p, c)) gateDirty = true;
     });
@@ -141,6 +145,23 @@ export class StuntDoublePlugin {
       });
     });
   }
+}
+
+function shimContents(p, into) {
+  for (const s of p.sdk?.slotNames ?? []) {
+    const f = p.shimFile(s);
+    let c = null;
+    try { c = fs.readFileSync(f, 'utf8'); } catch {}
+    into.set(f, c);
+  }
+  return into;
+}
+
+/** Shim files whose content differs from the last snapshot (updates the snapshot). */
+function shimChanges(p, seen) {
+  const before = new Map(seen);
+  shimContents(p, seen);
+  return [...seen].filter(([f, c]) => before.get(f) !== c).map(([f]) => f);
 }
 
 /** Did this watch rebuild touch a file the type gate reads (overrides, their imports, the check file)? */
