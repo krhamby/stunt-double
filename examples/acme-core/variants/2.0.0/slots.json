@@ -3,7 +3,9 @@
     "Button": { "kind": "client" },
     "Price": { "kind": "client", "renamedFrom": ["PriceTag"] },
     "Logo": { "kind": "client", "required": true },
-    "Footer": { "kind": "client", "required": true }
+    "Footer": { "kind": "client", "required": true },
+    "formatPrice": { "kind": "value" },
+    "analytics": { "kind": "value" }
   },
   "removedSlots": {
     "Badge": "stock state is now part of ProductCard itself; drop the override (removed in 2.0.0)"

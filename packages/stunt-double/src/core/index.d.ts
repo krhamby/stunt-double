@@ -45,9 +45,16 @@ export interface GenerateOptions extends StuntDoubleConfig {
   configFile?: string;
 }
 
+/**
+ * client | shared | server: a React component, checked against SlotProps[slot] (its props).
+ * value: anything else (a service, client, function, hook, class or config object), checked against SlotTypes[slot].
+ */
+export type SlotKind = 'client' | 'shared' | 'server' | 'value';
+
 export interface SlotMeta {
   export?: string;
-  kind?: 'client' | 'shared' | 'server';
+  /** Default "client". */
+  kind?: SlotKind;
   default?: string;
   required?: boolean;
   consumers?: string[];
@@ -83,6 +90,8 @@ export interface Sdk {
   removedSlots: Record<string, string>;
   defaultFile(slot: string): string | null;
   exportOf(slot: string): string;
+  /** The slot is a value slot (kind "value"), not a component. */
+  isValue(slot: string): boolean;
 }
 
 export interface Layer {
@@ -106,7 +115,7 @@ export interface Implementation {
 
 export interface SlotEntry {
   slot: string;
-  kind: 'client' | 'shared' | 'server';
+  kind: SlotKind;
   required: boolean;
   exportName: string;
   /** [app claim?, layer impls (last listed first)?, SDK default?] */
@@ -143,6 +152,8 @@ export interface Project {
   /** the universal tier's link dependency, or null */
   link: { field: string; spec: string; linkForm: boolean; dir: string | null } | null;
   pm: string;
+  /** the Yarn Plug'n'Play runtime (.pnp.cjs) path, or null */
+  pnpFile: string | null;
   isPnP: boolean;
   rsc: boolean;
   /** Injection errors ([F1]..[F9], [CFG], [SETUP], ...). Non-empty = the build must fail. */
@@ -180,6 +191,10 @@ export interface Project {
   genDirRegex: RegExp;
   /** <genDir>/<Slot>.jsx */
   shimFile(slot: string): string;
+  /** The shim a socket specifier ("@acme/core-slots/Button") resolves to; null when it names no slot. */
+  socketShim(specifier: string): string | null;
+  /** The config file and package.json: files whose change means "regenerate" (besides the overrides). */
+  watchFiles: string[];
   /** id lies in the gen dir or the overrides dir (must never be pre-bundled) */
   isProjectSlotFile(id: string): boolean;
   /** a change to this file can change the generation result */
@@ -254,6 +269,8 @@ export declare function publishedDtsFiles(pkgDir: string, pkg: any): string[];
 export declare function contractsDts(pkgDir: string, pkg: any): string | null;
 export declare function abiOf(manifest: SlotManifest, contractsText: string, slotPackage: string, version: string): string;
 export declare function contractSlots(contractsDts: string): string[] | null;
+/** Property names of the interface (or type literal) `name` (e.g. "SlotProps", "SlotTypes") in a contracts .d.ts. */
+export declare function contractKeys(contractsDts: string, name: string): string[] | null;
 export declare function schemaFor(manifest: SlotManifest): object;
 
 export declare const DEFAULTS: Readonly<Required<StuntDoubleConfig>>;
@@ -261,9 +278,17 @@ export declare const CONFIG_FILE: 'stunt-double.config.json';
 export declare const PACKAGE_KEY: 'stuntDouble';
 export declare const TOOL_VERSION: string;
 export declare const MANIFEST_FILE: 'slot-manifest.json';
+export declare const SLOT_KINDS: readonly SlotKind[];
 export declare function loadConfig(root: string, overrides?: Partial<GenerateOptions>): { cfg: Required<StuntDoubleConfig>; configFile: string | null; configSource: string; problems: string[] };
 export declare function detectPackageManager(root: string): string;
 export declare function detectPnP(root: string): boolean;
+/** The Yarn Plug'n'Play runtime file (.pnp.cjs) of the project at `root`, or null. */
+export declare function findPnpFile(root: string): string | null;
+/**
+ * Split an adapter's options into its own flags and generate() options; any other key becomes a [CFG] problem
+ * (in `genOpts.optionProblems`, reported by generate()).
+ */
+export declare function adapterOptions<F extends Record<string, unknown>>(name: string, options: Record<string, unknown> | undefined, flagDefaults: F): { flags: F; genOpts: Partial<GenerateOptions> };
 export declare function detectRsc(root: string, setting: 'auto' | boolean): boolean;
 export declare function loadSdk(root: string, cfg: StuntDoubleConfig): { sdk: Sdk | null; problems: string[] };
 export declare function loadLayers(root: string, cfg: StuntDoubleConfig, sdk: Sdk): { layers: Layer[]; problems: string[] };

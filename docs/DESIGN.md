@@ -7,7 +7,7 @@
 | Package | `stunt-double` v0.1.0 (MIT). One npm package: the CLI plus subpath exports `stunt-double/core`, `/vite`, `/esbuild`, `/webpack`, `/next`, `/jest`, `/metro`, `/parcel`, `/bun` |
 | Example SDK | `@acme/core`, the company's product SDK. Its socket package is `@acme/core-slots` |
 | Companion docs | [DECISIONS.md](DECISIONS.md): why this design and not the others, and the open questions. [README](../README.md): quickstart |
-| Audience | React + TypeScript engineers who know runtime DI (Swinject, a React context registry) and want the same flexibility with build-time failures |
+| Audience | React + TypeScript engineers who know runtime DI (InversifyJS, tsyringe, a React context registry) and want the same flexibility with build-time failures |
 
 ## Contents
 
@@ -38,7 +38,7 @@
 - **eliminate the default**: if the project replaces `Button` outright, the SDK's default `Button` should not be in the bundle at all;
 - **allow wrapping**: an override can wrap the SDK default (add a class, read the app theme) without creating an import cycle.
 
-At work you would do this with Swinject: register an implementation in a container, then resolve it where it is needed. The weakness of runtime DI is *when* it reports mistakes. A missing registration, a typo'd key, or an implementation of the wrong type shows up only when `resolve()` runs, which means in a running app, usually as a crash.
+With runtime DI (InversifyJS, tsyringe, or a React context that hands components down) you register an implementation in a container, then resolve it where it is needed. The weakness of runtime DI is *when* it reports mistakes. A missing registration, a typo'd key, or an implementation of the wrong type shows up only when `resolve()` runs, which means in a running app, usually as a crash.
 
 **The north star is "build failures rather than runtime failures".** Every injection mistake must either:
 
@@ -58,19 +58,22 @@ The code uses plain names throughout:
 | **slot** | an overridable SDK component, such as `Button` |
 | **override** | the project's implementation of a slot, such as `src/overrides/Button.tsx` |
 | **socket** | the bare import specifier the SDK renders a slot through: `@acme/core-slots/Button` |
-| **shim** | the generated one-line file that answers a socket: `sdk-slots/gen/Button.jsx` |
+| **shim** | the generated one-line file that answers a socket: `.stunt-double/gen/Button.jsx` |
 | **original** | the SDK default implementation of a slot: `@acme/core/original/Button` |
 | **contract** | the props type every implementation of a slot must accept: `SlotProps['Button']` |
 
-### 1.3 Swinject mapped to stunt-double
+### 1.3 Runtime DI mapped to stunt-double
 
-| Swinject (runtime) | stunt-double (build time) |
+| Runtime DI (InversifyJS, tsyringe, React context) | stunt-double (build time) |
 |---|---|
-| `container.register(Button.self) {…}` | the file `src/overrides/Button.tsx` |
-| the protocol a registration must conform to | the contract `SlotProps['Button']` from `@acme/core/contracts` |
-| `resolve()` | a static `import`: the SDK imports `@acme/core-slots/Button` |
-| the container's registration table | one generated shim per slot in `sdk-slots/gen/`, reached through one static alias or a package link |
-| parent-container fallback | the effective order: app override, then optional brand layers, then the SDK default (§5.5) |
+| `<SlotsProvider components={{ Button: BrandButton }}>` | the file `src/overrides/Button.tsx` |
+| `container.register('Analytics', { useClass: BrandAnalytics })`: any type, not only components | the file `src/overrides/analytics.ts`, a **value slot** (§6.6) |
+| the interface or token a registration is typed against | the contract `SlotProps['Button']` (a component) or `SlotTypes['analytics']` (a value) from `@acme/core/contracts` |
+| singleton scope (one shared instance) | the default: an ES module is evaluated once per bundle |
+| transient scope, or registration with runtime arguments | a value slot whose value is a factory: `createClient(options)` |
+| `container.resolve()` / `useContext()` | a static `import`: the SDK imports `@acme/core-slots/Button` |
+| the container's registration table | one generated shim per slot in `.stunt-double/gen/`, reached through one static alias (or, in the universal tier, a linked package) |
+| child-container fallback to the parent | the effective order: app override, then optional brand layers, then the SDK default (§5.5) |
 | a wrong registration, a missing registration, or a type mismatch crashes at runtime | a non-zero exit from `vite build` / `next build` / `webpack` / `tsc`, or an overlay in the dev server, with an `[Fx]` message that names the file and the fix |
 
 ### 1.4 How it works, in 30 seconds
@@ -88,15 +91,15 @@ The code uses plain names throughout:
    | one static alias in the     | package link:                 | the registry placeholder       |
    | tool's own config:          | node_modules/@acme/core-slots | @acme/core-slots@0.0.1:        |
    | '@acme/core-slots/*' ->     |   -> ./sdk-slots              |   import './STUNT-DOUBLE-NOT-  |
-   | <root>/sdk-slots/gen/*.jsx  |   exports "./*" -> gen/*.jsx  |   WIRED -- ... run npx         |
+   | .stunt-double/gen/*.jsx     |   exports "./*" -> gen/*.jsx  |   WIRED -- ... run npx         |
    | + validation + type gate    |                               |   stunt-double doctor'         |
    +--------------+--------------+---------------+---------------+----------------+---------------+
                   +--------------+---------------+                                v
                                  v                                 RESOLVE ERROR: the build fails
- sdk-slots/gen/Button.jsx   (generated, gitignored, plain ESM in a .jsx file)
+ .stunt-double/gen/Button.jsx   (generated; the directory ignores itself; plain ESM in a .jsx file)
      "use client";  export { Button } from '../../src/overrides/Button.tsx';   <- a double was cast
      "use client";  export { Button } from '@acme/core/original/Button';       <- no override: the lead plays it
- src/stunt-double.check.ts  (generated) proves every override fits its contract; the adapter runs it in the build
+ .stunt-double/check.ts     (generated) proves every override fits its contract; the adapter runs it in the build
 ```
 
 In five points:
@@ -105,7 +108,7 @@ In five points:
 2. The project answers each socket with a generated one-line **shim**. The shim re-exports either the project's override (`src/overrides/Button.tsx`) or the SDK default (`@acme/core/original/Button`).
 3. Tools reach the shims in one of two ways. In the **adapter tier (T1)**, one static alias is added by a thin adapter that also runs validation and the contract type check inside the tool's own config. In the **universal tier (T0)**, standard package resolution follows a linked package.
 4. A tool or module graph that nobody wired resolves the socket to a **registry placeholder** whose only content is an import that cannot resolve. It fails with a message that says how to fix it, and never quietly falls back to the SDK default. This is what "fail-closed" means here.
-5. A generated **check file**, `src/stunt-double.check.ts`, proves that each override accepts every props object the SDK may pass. The adapter runs it inside `vite build` / `webpack` / esbuild, and `next build`, CRA, `tsc` and the IDE see it natively.
+5. A generated **check file**, `.stunt-double/check.ts`, proves that each override fits its contract: a component accepts every props object the SDK may pass, a value (§6.6) has the contract's type. Every adapter runs it with its own tsconfig inside the build (`vite build`, esbuild, webpack, Rspack, and `next build` at config load); `stunt-double check` runs it in CI. The app's tsconfig is never edited (`init --editor` opts it in for IDE squiggles).
 
 **The public specifiers.**
 
@@ -114,7 +117,7 @@ In five points:
 | `@acme/core` | the SDK barrel. Slot re-exports are the **effective** components | no (the barrel's socket imports are) |
 | `@acme/core-slots/X` | the socket: the effective X | always (alias, link, or placeholder error) |
 | `@acme/core/original/X` | the SDK default of X (the wrapping escape hatch) | **never** |
-| `@acme/core/contracts` | types: `SlotProps`, `SlotName`, `RequiredSlot`, `SlotAbi` | never; type-only |
+| `@acme/core/contracts` | types: `SlotProps` (components), `SlotTypes` (values), `SlotName`, `RequiredSlot`, `SlotAbi` | never; type-only |
 | `<layer>/layer/X` | a brand layer's implementation of X (optional, §5.5) | never |
 
 **Why fail-closed.** A substitution system in which the SDK default is the natural resolution is fail-open. Every tool and graph that does not run the interceptor silently renders the default. Examples observed in the labs: the Vite dev pre-bundler, SSR externals, Vitest, Jest without a mapper, Turbopack's silent alias fallback for missing or absolute targets, Rspack ignoring `resolve.plugins`, tsconfig `paths` that bundlers do not apply inside `node_modules`, and Bun runtime plugins that never see bare specifiers [V]. In stunt-double the SDK has *no* module path to its defaults. The only importer of `original/*` is a project shim or override, so forgetting the wiring is a resolution error [V][S].
@@ -132,12 +135,10 @@ The overrides directory contains only real customizations. Adapters regenerate t
 ### 1.5 Recommended setup for a standard app (npm + Vite + Vitest)
 
 1. Run `npm i -D stunt-double`.
-2. Run `npx stunt-double init`.
-3. Add `plugins: [react(), stuntDouble()]` to `vite.config.ts` (`import { stuntDouble } from 'stunt-double/vite'`).
-4. Put overrides in `src/overrides/`.
-5. CI runs `npm ci && npx stunt-double check && npm run build && npm test`.
+2. Add `plugins: [react(), stuntDouble()]` to `vite.config.ts` (`import { stuntDouble } from 'stunt-double/vite'`).
+3. Put overrides in `src/overrides/`.
 
-Next.js, webpack and Jest use the same steps with their one-line wrapper (§7).
+Nothing else is edited: generated files go to `.stunt-double/`, which ignores itself, and the type gate uses its own tsconfig there. CI runs `npm ci && npx stunt-double check && npm run build && npm test`. `npx stunt-double init` only offers optional extras (`--editor`, `--ci`, `--universal`). Next.js, esbuild, webpack, Rspack and Jest use the same steps with their one-line wrapper (§7).
 
 ### 1.6 Evidence tags used throughout
 
@@ -162,7 +163,7 @@ This is the contract stunt-double makes with you: for each injection mistake, wh
 | **CFG** | Config-time guard | Adapter config hooks: Vite `configResolved`, `withStuntDouble()` for Next / Jest / webpack / Metro at config load | ~0 |
 | **STA** | Static validation (the generator) | Every adapter start (config load, `buildStart`, esbuild `onStart`, webpack `watchRun`), `stunt-double gen` / `stunt-double check`, root `postinstall` | ~50 ms cold, 2–3 ms warm [V]; transitive F7 walk 2–3 ms [S] |
 | **RES** | Native resolution or linking | Every tool and every graph, with no stunt-double code | 0 |
-| **TYP** | Contract type check of the generated `src/stunt-double.check.ts` | Adapter build start (Vite, Rollup, Rolldown, esbuild, webpack, Rspack); natively in `next build` and CRA; `stunt-double check`; `tsc --noEmit`; the IDE | TS 7: 150–200 ms; TS 5.9: 0.8–1.0 s [V] |
+| **TYP** | Contract type check of the generated `.stunt-double/check.ts` | Adapter build start (Vite, Rollup, Rolldown, esbuild, webpack, Rspack); natively in `next build` and CRA; `stunt-double check`; `tsc --noEmit`; the IDE | TS 7: 150–200 ms; TS 5.9: 0.8–1.0 s [V] |
 | **AUD** | Post-bundle module-graph audit | Adapters in build mode (`buildEnd`, `finishModules`, esbuild `onEnd` metafile) | ~ms |
 | **DEV** | Dev error channel | (a) Poisoned shims: every dev server shows its own unresolved-import overlay or HTTP 500 [V Vite, Next Turbopack, Next webpack]. (b) The Vite adapter also pushes `{type:'error'}` over HMR [V] | 0 |
 
@@ -227,7 +228,7 @@ In the **Production builds** column, "esbuild+" means esbuild, Rolldown and Roll
 
 | # | Mistake | How it is handled |
 |---|---|---|
-| X1 | `typescript.ignoreBuildErrors` in Next | CFG: the adapter refuses; `next build` exits 1 [V] |
+| X1 | `typescript.ignoreBuildErrors` in Next | No longer a mistake: the Next adapter runs the contract gate itself at config load, so `ignoreBuildErrors` only skips Next's own check (§7.4) [V] |
 | X2 | Check file not part of the tsconfig program | It is listed in tsconfig `files`, so a missing file gives TS6053 [V]; the generator warns if it is not covered [U] |
 | X3 | TypeScript 7 under Yarn PnP (TS 7.0.2 cannot resolve modules under PnP) | CFG `[TS-PNP]` with instructions [U]; otherwise it fails closed with TS2307 everywhere [V] |
 | X4 | Two TypeScript versions installed (`.bin/tsc` collision) | The gate resolves `typescript` by package name [V] |
@@ -245,6 +246,8 @@ Every line starts with a stable code, names the file and slot, and says what to 
 stunt-double: 2 injection errors (@acme/core@1.0.0)
   [F1] Button (src/overrides/Button.tsx): TS2322 Type 'ButtonProps' is not assignable to type 'ButtonProps & { tone: "loud"; }'. Property 'tone' is missing ... (tsc 7.0.2, 162 ms)
   [F1] Button (src/overrides/Button.tsx): override ignores these SDK props: "onClick" | "variant" (declare them, or list them in stunt-double.config.json map.Button.ignoresProps)
+  [F1] analytics (src/overrides/analytics.ts): does not fit the contract @acme/core SlotTypes['analytics']: TS2741 Property 'id' is missing ...
+  [F1] analytics (src/overrides/analytics.ts): narrows the parameters of these members: "track" (the SDK may pass any value its contract allows: accept the contract's parameter types)
   [F2] src/overrides/Buton.tsx overrides unknown slot "Buton" (did you mean "Button"?). @acme/core@1.0.0 slots: Button, Card, Logo. Helpers belong in _-prefixed files or inside src/overrides/<Slot>/.
   [F2] src/overrides/Button.tsx: slot "Button" was RENAMED to "ActionButton" in @acme/core@2.0.0: rename the file to ActionButton.tsx and export `ActionButton`.
   [F2] src/overrides/Tooltip.tsx: slot "Tooltip" was REMOVED in @acme/core@2.0.0: use the Popover slot.
@@ -256,15 +259,15 @@ stunt-double: 2 injection errors (@acme/core@1.0.0)
   [F6] Vitest deps.optimizer.ssr pre-bundles @acme/core outside the plugin pipeline: overrides would be lost. Remove it from include.
   [F6] @acme/core resolves @acme/core-slots to node_modules/.pnpm/@acme+core-slots@file+sdk-slots/... (a copy, a missing link, or another app's slot package), not sdk-slots/. Use npm "file:", pnpm "link:", Yarn "portal:", Bun "workspace:*".
   [F6] src/pages/Legacy.tsx imports "@acme/core/original/Button" outside src/overrides: that call site renders the SDK default and bypasses the "Button" slot. Import from "@acme/core".
-  [F6] @acme/core imports @acme/core-slots/Button but sdk-slots/gen/Button.jsx is not in the bundle: an alias or plugin resolved the socket elsewhere.
+  [F6] @acme/core imports @acme/core-slots/Button but .stunt-double/gen/Button.jsx is not in the bundle: an alias or plugin resolved the socket elsewhere.
   [F7] src/overrides/Button.tsx -> src/components/Fancy.tsx uses <ns>.Button from "@acme/core": that is slot "Button" itself (infinite render). Wrap the default via '@acme/core/original/Button'.
+  [F7] src/overrides/formatPrice.ts imports { formatPrice } from "@acme/core": that is slot "formatPrice" itself (a circular import: the implementation would read itself before it is initialized). Use the default via '@acme/core/original/formatPrice'.
   [W7] src/overrides/Button.tsx renders Dialog from @acme/core, and Dialog renders slot "Button": check for infinite recursion.
   [F8] "react" resolves to 2 copies: app -> node_modules/react, @acme/core -> node_modules/@acme/core/node_modules/react. Contexts/hooks break at runtime. Dedupe the install.
   [F8] "react" is bundled from 2 locations (node_modules/react, ../sdk/node_modules/react): dedupe it (resolve.dedupe / alias / single install).
   [F9] src/overrides/Button.tsx imports "server-only" but "Button" is a client slot (rendered inside "use client" SDK components).
-  [STALE] src/stunt-double.check.ts(31,1): error TS2578: Unused '@ts-expect-error' directive.   <- comment above it: src/overrides/Logo.* now exists; run `npx stunt-double gen`
-  [TS-PNP] TypeScript 7.0.2 cannot resolve modules under Yarn Plug'n'Play: set "typescript": "typescript5" (npm alias of typescript@5.9) in stunt-double.config.json.
-  [X1] typescript.ignoreBuildErrors would skip the slot contract check (src/stunt-double.check.ts). Remove it.
+  [STALE] .stunt-double/check.ts(31,1): error TS2578: Unused '@ts-expect-error' directive.   <- comment above it: src/overrides/Logo.* now exists; run `npx stunt-double gen`
+  [TS-PNP] TypeScript 7.0.2 cannot resolve modules under Yarn Plug'n'Play: make typescript@5.9 the project's "typescript" dev dependency (Yarn patches it for PnP; an npm alias such as "typescript5" is NOT patched and cannot resolve either).
 ```
 
 When a tool or graph was never wired, stunt-double's own code never runs; the tool's native resolver prints the placeholder's poison text. Strings are verbatim [S] (captured under the earlier working name; absolute paths shortened):
@@ -356,7 +359,7 @@ Generated from a `defineSlots()` table in the SDK source.
 ```
 
 - **`stuntDouble`** is the semver range of the tool that may read this manifest. The generator refuses an unknown `schema` or a tool version outside the range (fail closed).
-- **`kind`** is `client`, `shared` or `server`. Only `client` gets `"use client"` and the not-async check.
+- **`kind`** is `client`, `shared` or `server` for a component slot, or `value` for anything else (§6.6). Only `client` gets `"use client"` and the not-async check. A kind the installed stunt-double does not know fails generation with `[SETUP] … Upgrade stunt-double` (fail closed: it would otherwise be checked against the wrong contract).
 - **`consumers`** is computed by `sdk-lint` from the dist graph. It feeds the W7 warning.
 - **Renames and removals** are declared by the version that makes them. A later major declares `"ActionButton": { …, "renamedFrom": ["Button"] }` and `"removedSlots": { "Tooltip": "use the Popover slot (removed in 2.0.0)" }`. That turns upgrade breakage into an F2 with exact instructions [V].
 
@@ -447,10 +450,14 @@ What SDK authors change: socket imports only, one manifest entry and one contrac
 ```
 src/overrides/Button.tsx            one file per overridden slot (or Button/index.tsx); helpers: _x.tsx or Button/helpers.tsx
 src/overrides/Logo.tsx              required slot implementation
-src/stunt-double.check.ts           GENERATED, gitignored, listed in tsconfig "files"
-sdk-slots/package.json              COMMITTED stub (the universal-tier package; NO dependencies, NO peerDependencies)
-sdk-slots/gen/                      GENERATED, gitignored: <Slot>.jsx, <Slot>.d.ts, state.json, tsconfig.check.json, check.map.json, dist-scan cache
+src/overrides/analytics.ts          a value slot implementation (§6.6)
+.stunt-double/                      GENERATED, ignores itself (its own .gitignore): gen/<Slot>.jsx + .d.ts, check.ts,
+                                    tsconfig.check.json, check.map.json, state.json, dist-scan.json
 stunt-double.config.json            optional (or a "stuntDouble" key in package.json)
+
+universal tier only (npx stunt-double init --universal), instead of .stunt-double/:
+sdk-slots/package.json              COMMITTED stub (the linked package; NO dependencies, NO peerDependencies)
+sdk-slots/gen/, sdk-slots/check.ts  GENERATED, as above
 ```
 
 Ignored inside `src/overrides`: `_*`, `*.test.*`, `*.spec.*`, `*.stories.*`, `*.d.ts`, and assets. Every other top-level file must be a slot (`<Slot>.<ext>` or `<Slot>/index.<ext>`), otherwise you get F2. That is what makes typos and stray files loud.
@@ -464,8 +471,7 @@ All keys are optional. Defaults are shown, except that `map` and `allowOriginalI
   "$schema": "./node_modules/@acme/core/stunt-double.schema.json",
   "sdk": "@acme/core",
   "overridesDir": "src/overrides",
-  "slotsDir": "sdk-slots",
-  "checkFile": "src/stunt-double.check.ts",
+  "outDir": ".stunt-double",
   "tsconfig": "tsconfig.json",
   "typescript": "typescript",
   "rsc": "auto",
@@ -477,15 +483,18 @@ All keys are optional. Defaults are shown, except that `map` and `allowOriginalI
   "allowOriginalImports": ["src/styleguide/**"],
   "singletons": ["react", "react-dom"],
   "scanPackages": [],
-  "relativeEdges": "error"
+  "relativeEdges": "error",
+  "sourceDirs": ["src"]
 }
 ```
 
+- **`outDir`:** the one generated directory. The default is `.stunt-double`; in the universal tier it is the linked package's directory (e.g. `sdk-slots`). It must be a directory of its own: everything in it is generated and git-ignored. (`slotsDir` and `checkFile` of earlier layouts are `[CFG]` errors that point here.)
 - **`tsconfig`:** point it at the *app* tsconfig for solution-style setups. For example, Vite templates use `tsconfig.app.json`, because `tsconfig.json` only has `references`.
 - **`rsc`:** `auto` emits `"use client"` when `next`, `waku`, `@vitejs/plugin-rsc` or a `react-server-dom-*` package is a dependency.
-- **`typescript`:** a package name, so `"typescript5"` (an npm alias) can be the gate compiler.
+- **`typescript`:** a package name, so `"typescript5"` (an npm alias) can be the gate compiler. Not under Yarn PnP: Yarn patches only the package named `typescript` for PnP, so there the project's own `typescript` must be 5.9 (§6.4).
 - **`map`:** claims a slot from a file outside the convention directory (`from`), or under another export name (`export`, which may be `"default"`). `ignoresProps` is the explicit, reviewable opt-out from the "declares all props" check (§6.1).
-- **`relativeEdges`:** `"error"` (default) reports SDK-internal relative edges as F6; `"redirect"` is the degraded mode of §11.
+- **`relativeEdges`:** `"error"` (default) reports SDK-internal relative edges as F6; `"redirect"`, the degraded mode of §11, is not implemented yet (a `[CFG]` error).
+- **`sourceDirs`:** where the bypass scan (F6g) looks for app code importing `original/*`.
 
 ### 4.3 Overrides
 
@@ -514,7 +523,11 @@ export const Button = memo(function Button({ children, variant = 'primary', onCl
 
 Type props as `SlotProps['X']` so SDK upgrades flow through. Overrides that declare their own props interface still work: the check proves compatibility.
 
-### 4.4 Wiring, written by `stunt-double init`
+### 4.4 Wiring
+
+**Adapter tier (the default).** The adapter line in the tool's config is the whole wiring. Nothing else in the project is edited: the slot package is not linked, so a tool *without* an adapter resolves the registry placeholder and fails (fail closed); the type gate uses `.stunt-double/tsconfig.check.json`, which extends the app tsconfig; and app types need no `paths`, because the SDK's published declarations point at the originals (`sdk-lint --fix`, §3.6). App code is therefore typed by the SDK contract, and go-to-definition lands on the SDK declaration; `stunt-double why <Slot>` shows the effective implementation.
+
+**Universal tier (`npx stunt-double init --universal`)**, for tools without an adapter. It writes the following.
 
 **`package.json`**
 
@@ -552,33 +565,29 @@ Type props as `SlotProps['X']` so SDK upgrades flow through. Overrides that decl
 
 A stub must exist, or npm fails install with ERESOLVE [V]. Its version must not be a prerelease, so that it satisfies the peer `*` [S].
 
-**tsconfig** (the app config). It is written without `baseUrl`, which TypeScript 7 rejects with TS5102 [V]:
+**`stunt-double.config.json`:** `"outDir": "sdk-slots"` is derived from the link automatically; the directory's own `.gitignore` keeps everything but the stub out of git.
 
-```jsonc
-{ "compilerOptions": { "paths": { "@acme/core-slots/*": ["./sdk-slots/gen/*"] } },
-  "include": ["src"],
-  "files": ["src/stunt-double.check.ts"] }          // missing generated file => TS6053, never "silently unchecked" [V]
-```
-
-`paths` keeps types identical to runtime even when there is no link. TypeScript applies `paths` inside `node_modules` `.d.ts` files [V]. The target is the same shim the bundlers use, so types and runtime cannot split. Bun's bundler and runtime also honour `paths` for `node_modules` imports [V].
-
-**`.gitignore`:** `sdk-slots/gen/` and `src/stunt-double.check.ts`.
+**Editor squiggles (`npx stunt-double init --editor`, optional, either tier).** Adds the check file to the app tsconfig's `"files"`, so contract errors show in the IDE on the exact assertion line, and a `postinstall` of `stunt-double gen --no-fail`, so a fresh clone has the file before `tsc` runs. A listed check file that is missing is TS6053, never "silently unchecked" [V]; `doctor` reports a stale location (X2).
 
 ### 4.5 Generated artifacts (examples)
 
 ```js
-// sdk-slots/gen/Button.jsx
+// .stunt-double/gen/Button.jsx
 'use client';
 // GENERATED by stunt-double: slot "Button" -> src/overrides/Button.tsx#Button. Do not edit; regenerate: npx stunt-double gen
 export { Button } from '../../src/overrides/Button.tsx';
 
-// sdk-slots/gen/Card.jsx  (no override)
+// .stunt-double/gen/Card.jsx  (no override)
 'use client';
 // GENERATED by stunt-double: slot "Card" -> @acme/core default
 export { Card } from '@acme/core/original/Card';
 
-// sdk-slots/gen/Button.d.ts
+// .stunt-double/gen/Button.d.ts
 export { Button } from '../../src/overrides/Button.js';
+
+// .stunt-double/gen/formatPrice.jsx  (a value slot: never "use client")
+// GENERATED by stunt-double: slot "formatPrice" -> src/overrides/formatPrice.ts#formatPrice. Do not edit; regenerate: npx stunt-double gen
+export { formatPrice } from '../../src/overrides/formatPrice.ts';
 ```
 
 ---
@@ -589,7 +598,7 @@ export { Button } from '../../src/overrides/Button.js';
 
 ```
 resolve('@acme/core-slots/S', importer anywhere, SDK internals included):
-  T1 adapter alias (static, identical for every override set):  -> <root>/sdk-slots/gen/S.jsx
+  T1 adapter alias (static, identical for every override set):  -> <root>/.stunt-double/gen/S.jsx
   else package resolution from realpath(importer): node_modules/@acme/core-slots
        -> link -> <root>/sdk-slots, exports "./*" -> ./gen/S.jsx (missing => RESOLVE ERROR)
        -> registry placeholder -> not-wired.js -> poisoned import => RESOLVE ERROR naming the fix
@@ -627,7 +636,7 @@ generate(root, opts):
   else emit (write only changed bytes, so there is no spurious HMR or cache invalidation):
      gen/S.jsx   = [directive] + `export { <impl export> as <S export> } from '<relative override path with .tsx | layer spec | original spec>'`
      gen/S.d.ts  = same re-export, '.js' extension form
-     src/stunt-double.check.ts (§6.1), gen/check.map.json (line ranges -> slot/file), gen/tsconfig.check.json, gen/state.json (fingerprint)
+     <outDir>/check.ts (§6.1), check.map.json (line ranges -> slot/file), tsconfig.check.json, state.json (fingerprint)
 ```
 
 ### 5.3 Core code (reference implementation excerpts)
@@ -743,49 +752,51 @@ A layer is a published package with a `slotLayer` field. Its own components rend
 
 This is "fits the costume". No bundler type-checks, and a plain project `tsc` has nothing that relates an override to the SDK's contract. stunt-double generates that relation as a small TypeScript file and makes sure something runs it in every build.
 
-### 6.1 The generated check file (`src/stunt-double.check.ts`)
+### 6.1 The generated check file (`.stunt-double/check.ts`)
+
+The gate compiles it with `.stunt-double/tsconfig.check.json`, which extends the app tsconfig (so overrides compile exactly as in the app: `jsx`, `lib`, `paths`, strictness) and whose program is this file plus what it imports. It imports only relative files, so it needs no `paths`. An excerpt of the file generated for `examples/customer-vite`:
 
 ```ts
-// GENERATED by stunt-double from @acme/core@1.0.0 — do not edit. Regenerate: npx stunt-double gen
+// GENERATED by stunt-double from @acme/core@1.0.0 - do not edit. Regenerate: npx stunt-double gen
 import type { ComponentProps, JSXElementConstructor } from 'react';
-import type { SlotProps, SlotName, SlotAbi } from '@acme/core/contracts';
-type PropsOf<C> = C extends JSXElementConstructor<any> ? ComponentProps<C> : never;
-type OnlyAsync<C> = C extends (...a: any[]) => infer R ? ([R] extends [PromiseLike<any>] ? true : false) : false;
+import type { SlotProps, SlotTypes, SlotName, SlotAbi } from '@acme/core/contracts';
+export type PropsOf<C> = C extends JSXElementConstructor<any> ? ComponentProps<C> : never;
+export type OnlyAsync<C> = C extends (...a: any[]) => infer R ? ([R] extends [PromiseLike<any>] ? true : false) : false;
+// ... ArgsOf / ArgsFit / NarrowedMembers / FitsArgs for value slots (§6.6)
 
-/** [STALE] TS2322 here = the installed SDK differs from the one this file was generated for: run `npx stunt-double gen` */
-export const __abi: SlotAbi = 'acme-core-slots/1.0.0+3f2a9c';
-/** [WIRING] TS2305/TS2307 here = @acme/core-slots is not the project's generated package (tsconfig paths / link missing) */
-import { Button as Button__wired } from '@acme/core-slots/Button';
-import { Card as Card__wired } from '@acme/core-slots/Card';
-import { Logo as Logo__wired } from '@acme/core-slots/Logo';
-/** [F2]/[F3] an SDK upgrade added or removed slots: TS2741/TS1360 here until regenerated */
-export const __slotSet = { Button: Button__wired, Card: Card__wired, Logo: Logo__wired } satisfies Record<SlotName, unknown>;
+/** [STALE] TS2322 here = the installed @acme/core differs from the one this file was generated for: run `npx stunt-double gen` */
+export const __abi: SlotAbi = 'acme-core-slots/1.0.0+bd4f88';
+/** [STALE] TS2305/TS2307 here = a generated shim (.stunt-double/gen/<Slot>.d.ts) is missing or out of date: run `npx stunt-double gen` */
+import { Button as Button__wired } from './gen/Button.js';
+// ... one wiring import per slot
+/** [F2]/[F3] an SDK upgrade added or removed slots: TS1360/TS2353 here until regenerated */
+export const __slotSet = { Button: Button__wired, /* ... */ formatPrice: formatPrice__wired } satisfies Record<SlotName, unknown>;
 
 // ---- slot "Button" <- src/overrides/Button.tsx#Button (client)
-import { Button as Button__impl } from './overrides/Button';                 // [F5] TS2305/TS2614 if the export is missing
-export const Button__isComponent: JSXElementConstructor<any> = Button__impl; // [F1] must be a component (fn, memo, forwardRef, class)
-/** [F1] must accept EVERY props object the SDK may pass. Plain object assignability: independent of strict mode. */
-export const Button__accepts = (p: SlotProps['Button']): PropsOf<typeof Button__impl> => p;
-type Button__missing = Exclude<keyof SlotProps['Button'], keyof PropsOf<typeof Button__impl> | never /* map.Button.ignoresProps */>;
-export const Button__declaresAll: [Button__missing] extends [never] ? true
-  : { '[F1] override ignores these SDK props (declare them, or list them in map.Button.ignoresProps)': Button__missing } = true;
-export const Button__notAsync: OnlyAsync<typeof Button__impl> extends true
+import { Button as Button__impl } from '../src/overrides/Button.js';                        // [F5] if the export is missing
+export const Button__impl__isComponent: JSXElementConstructor<any> = Button__impl;         // [F1] fn, memo, forwardRef, class
+export const Button__impl__accepts = (p: SlotProps['Button']): PropsOf<typeof Button__impl> => p;   // [F1] object assignability
+export const Button__impl__declaresAll: [Exclude<keyof SlotProps['Button'], keyof PropsOf<typeof Button__impl> | never>] extends [never] ? true
+  : { '[F1] override ignores these SDK props': Exclude<keyof SlotProps['Button'], keyof PropsOf<typeof Button__impl> | never> } = true;
+export const Button__impl__notAsync: OnlyAsync<typeof Button__impl> extends true
   ? { '[F9] client slot override must not be an async component': 'Button' } : true = true;
 
-// ---- slot "Logo" <- src/overrides/Logo.tsx#Logo (client, required)
-// ... same five assertions ...
+// ---- slot "analytics" <- src/overrides/analytics.ts#analytics (value)
+import { analytics as analytics__impl } from '../src/overrides/analytics.js';
+export const analytics__impl__fits: SlotTypes['analytics'] = analytics__impl;
+export const analytics__impl__argsFit: FitsArgs<SlotTypes['analytics'], typeof analytics__impl> = true;
 
 // ---- staleness probes for slots WITHOUT an override when generated (exported, so noUnusedLocals cannot mask them)
 // @ts-expect-error [STALE] no src/overrides/Card.* existed when generated; if this stops erroring, run `npx stunt-double gen`
-export type Card__probe = typeof import('./overrides/Card');
+export type Card__probe = typeof import('../src/overrides/Card');
 ```
 
 Reading it top to bottom:
 
 - **`__abi`** pins the SDK version and contract hash the file was generated for. Upgrading the SDK without regenerating is a TS2322 that names both ABIs.
-- **The wiring imports** fail with TS2305 when `@acme/core-slots` resolves to the placeholder instead of the project's package.
+- **The wiring imports** fail with TS2305/TS2307 when a generated shim is missing or out of date.
 - **`__slotSet`** fails when an SDK upgrade added or removed slots and the file was not regenerated.
-- **Five assertions per implementation**: the import itself (F5), `isComponent`, `accepts`, `declaresAll` and `notAsync`.
+- **Five assertions per component implementation**: the import itself (F5), `isComponent`, `accepts`, `declaresAll` and `notAsync` (client slots). A value implementation gets the import, `fits` and `argsFit` (§6.6).
 - **Staleness probes**: for each slot that had no override at generation time, a `@ts-expect-error` import of the file that would be its override. If someone adds that file without regenerating, the directive becomes unused and TypeScript reports TS2578.
 
 ### 6.2 What each assertion catches
@@ -835,10 +846,10 @@ export function runTypeGate(p) {
 | Tool | How F1 fails the build | Added cost (fixtures) |
 |---|---|---|
 | Vite 8 / Rolldown / Rollup | Adapter `buildStart` awaits the gate (memoized once per process for client + SSR environments) → `this.error` → exit 1 [V] | TS 7: +150–200 ms; TS 5.9: +0.8–1.0 s [V] |
-| esbuild | Adapter `onStart` returns `errors` [U; same pattern V] | same |
+| esbuild | Adapter `onStart` returns `errors`; `build()` rejects and nothing is written [V `tests/esbuild.test.mjs`] | same |
 | webpack 5 / Rspack 2 | Adapter starts the gate in `thisCompilation` and awaits it in `finishModules.tapPromise` (an AsyncSeriesHook in both [S]); pushes to `compilation.errors` (exit 1 + overlay; never throw [V]). **Do not** rely on fork-ts-checker 9.1.0: with TS 7 it crashes and the build passes [V]. ts-checker-rspack-plugin 1.7 with `tsgo:true` works [V] | same; fork-ts-checker was +1.4 s |
-| Next 16 | `next build` type-checks the whole program, including `src/stunt-double.check.ts` (TS 5.x via the API; TS 7 via the default `experimental.useTypeScriptCli`) [V]. The adapter refuses `ignoreBuildErrors` (X1) | Next's TS phase: 1.6–1.9 s (TS 5.9) |
-| CRA 5 (craco) | CRA's ForkTsChecker reports `src/**` only, so the check file lives in `src/` [V]. TS 5 only | included |
+| Next 16 | The adapter's config function runs the gate when `next build` loads the config (phase `phase-production-build`) and throws on a failure: the build exits 1 before compiling. Next's own type check does not include the check file, and `ignoreBuildErrors` cannot skip the adapter's gate [V `tests/next*.test.mjs`] | +150–200 ms (TS 7) at config load |
+| CRA 5 (craco) | The webpack adapter through craco's `webpack.configure` runs the gate itself [U] | same as webpack |
 | Jest / Vitest / `next dev` / webpack-dev-server | Not gates (babel/swc, or async dev). CI `tsc` / `stunt-double check` | — |
 | Parcel / Bun / Metro / unknown | `stunt-double check && <build>` | ~0.2 s (TS 7) |
 | CI (every project) | `stunt-double check` (STA + TYP) and the project's own `tsc --noEmit` (includes the check file) | |
@@ -848,15 +859,59 @@ export function runTypeGate(p) {
 - **Exit codes:** TS 7 exits 1 and TS 5.9 exits 2; the gate treats any non-zero exit as failure [V].
 - **`baseUrl`:** removed in TS 7 (TS5102), so `paths` are written relative to the tsconfig [V].
 - **Paths and conditions:** `paths` inside `node_modules` `.d.ts` and `customConditions` behave the same in both versions [V].
-- **Yarn PnP:** TS 7.0.2 cannot resolve under PnP and fails closed [V]. The gate refuses up front with `[TS-PNP]` and accepts a TS 5.x alias package [U].
+- **Yarn PnP:** TS 7.0.2 cannot resolve under PnP and fails closed [V]. The gate refuses up front with `[TS-PNP]`. TS 5.9 works only as the project's own `typescript`: Yarn's built-in compat patch applies to that package name, not to an npm alias such as `typescript5` (unpatched, it cannot resolve `types` entries) [V `tests/vite-yarn-pnp.test.mjs`]. The gate's child process keeps Yarn's `--require .pnp.cjs`, or it cannot even read tsc from the zip cache [V].
 - **Dot-directories:** generated files are never put in a dot-directory, because `**/*` include globs skip them [V].
 
 ### 6.5 What tsc and the IDE see
 
-- App code: `import { Button } from '@acme/core'` → the SDK's `index.d.ts` → `@acme/core-slots/Button` → `paths` → `sdk-slots/gen/Button.d.ts` → the override.
-- App code is therefore typed by the **override** (a proven supertype of the contract props), and **go-to-definition lands on `src/overrides/Button.tsx`** [V TS 5.9 language service; U tsgo LSP].
-- Un-overridden slots land on the SDK's `original` declaration.
-- Errors appear as squiggles on the exact assertion line, with the reason in the type text.
+- App code: `import { Button } from '@acme/core'` → the SDK's `index.d.ts`, whose published declarations point at `./original/Button.js` (`sdk-lint --fix`; a required slot is declared from its contract). No tsconfig `paths`, no link.
+- App code is therefore typed by the **SDK contract and original**, which every override is proven to fit. Go-to-definition lands on the SDK declaration; `stunt-double why Button` shows the effective implementation. Props an override adds beyond the contract are not visible through `@acme/core`.
+- *Earlier layout:* tsconfig `paths` to the shims' `.d.ts` typed app code by the override and sent go-to-definition to `src/overrides/Button.tsx` [V TS 5.9]; it was dropped so that adopting stunt-double edits no tsconfig.
+- Contract errors show in the IDE only with the opt-in `init --editor` (the check file in the app program); otherwise they surface in the build, `stunt-double check` and CI.
+
+### 6.6 Value slots
+
+A slot of kind `value` is anything an SDK lets a project replace that is not a component: a service object, an API client, a function, a hook, a class, a config object. Resolution is identical to a component slot (socket → shim → override or `original/*`); generation, the dist scan, the wiring self-test, the audit and every adapter treat both kinds the same. Only three things differ.
+
+**The contract is the value's whole type, in `SlotTypes`.** Component slots keep `SlotProps` (their props); `sdk-lint` rejects a slot whose contract is filed under the wrong interface. `SlotName` is `keyof SlotProps | keyof SlotTypes`.
+
+```ts
+// @acme/core contracts (the fixture)
+export type FormatPrice = (amount: number, currency?: string) => string;
+export interface Analytics { readonly id: string; track(event: string, data?: Record<string, unknown>): void }
+export interface SlotTypes { formatPrice: FormatPrice; analytics: Analytics }
+```
+
+**Two assertions per implementation** replace the five component assertions:
+
+```ts
+// ---- slot "analytics" <- src/overrides/analytics.ts#analytics (value)
+import { analytics as analytics__impl } from '../src/overrides/analytics.js';       // [F5]
+export const analytics__impl__fits: SlotTypes['analytics'] = analytics__impl;          // [F1] plain assignability
+export const analytics__impl__argsFit: FitsArgs<SlotTypes['analytics'], typeof analytics__impl> = true;  // [F1] parameters
+```
+
+`fits` alone is not enough. TypeScript compares function parameters **bivariantly** when `strictFunctionTypes` is off (strict off, Next's default tsconfig), and **method** parameters bivariantly even when it is on. So `track(event: 'page_view')` is assignable to `track(event: string)`, and the SDK would call it with `'add_to_cart'`. `argsFit` compares argument tuples instead of function types, which is strict-independent. It checks that every argument list the contract allows starts with something the implementation accepts (`ArgsOf<C> extends [...ArgsOf<I>, ...unknown[]]`). It does this for the value itself and for each top-level member, including optional ones, and for constructors through `ConstructorParameters`.
+
+Verified in TypeScript 7.0.2 and 5.9.3, strict on and off [S]:
+
+| Implementation | `fits` | `argsFit` | Result |
+|---|---|---|---|
+| typed `SlotTypes['X']`; a function declaration; fewer parameters; extra optional or rest parameters; a generic function | ok | ok | **pass** |
+| a class instance with extra members; a constructor with the contract's parameters | ok | ok | **pass** |
+| wrong return type, missing member, extra required parameter | TS2322 | | **fail** |
+| narrowed function parameter (`amount: 1 \| 2`) | TS2322 with strict on; **passes** with strict off | TS2322 `narrows the parameters of the contract` | **fail** |
+| narrowed method parameter (`track(event: 'page_view')`) | **passes**, strict on or off | TS2322 `narrows the parameters of these members: "track"` | **fail** |
+| narrowed constructor parameter | passes with strict off | TS2322 | **fail** |
+
+**Messages.** F7 for a value slot is a circular import that reads the slot before it is initialized, not an infinite render. W7 warns that an override importing an SDK export which uses the slot must not use it during module initialization. `"use client"` is never emitted for a value shim (a value is not a client reference), and F9 does not apply.
+
+**What stays runtime.** A container's scopes map to module semantics: one instance per bundle (singleton scope) by default, and a factory for anything per-call (transient scope, runtime arguments). Choosing an implementation **at runtime** (per user, per feature flag, per test) is by definition not a build-time decision. Inject a factory or strategy object that decides at runtime; tests keep using `vi.mock` / `jest.mock`.
+
+**Known gaps.**
+- `argsFit` checks top-level members only; a nested object's methods get plain assignability.
+- For an overloaded function, `Parameters<>` sees only the last overload.
+- Optional contract members are checked when the implementation has them; an implementation may omit them, as TypeScript allows.
 
 ---
 
@@ -865,7 +920,7 @@ export function runTypeGate(p) {
 Every adapter is a thin wrapper around the same pure core (`stunt-double/core`). Every adapter does four things:
 
 1. regenerates and validates at start;
-2. installs **one static alias**, `@acme/core-slots/<Slot>` → `<root>/sdk-slots/gen/<Slot>.jsx`;
+2. installs **one static alias**, `@acme/core-slots/<Slot>` → `<root>/.stunt-double/gen/<Slot>.jsx`;
 3. reports through the host's error channel, never with a bare `throw`, except at config load where a throw *is* the gate;
 4. runs the type gate and the audit in build mode.
 
@@ -878,6 +933,8 @@ Every adapter is a thin wrapper around the same pure core (`stunt-double/core`).
 | Jest 30 | `withStuntDouble()` from `stunt-double/jest` | §7.5 |
 | Metro (React Native / Expo) | `withStuntDouble()` from `stunt-double/metro` | §7.6 |
 | Parcel 2, Bun 1.4, Farm, unknown bundlers | universal tier; optional `stunt-double/parcel` resolver and `stuntDoubleBun()` from `stunt-double/bun` | §7.7 |
+
+**Implementation status.** The code in §7.1–§7.5 is the design sketch. The implementations live in `packages/stunt-double/src/adapters/` (`vite.mjs`, `esbuild.mjs`, `webpack.mjs`, `next.mjs`, `jest.mjs`); each is run against the whole shared mistake catalogue by a toolchain suite in `tests/` (Vite, esbuild, webpack + Jest, Rspack, Next with Turbopack and with `--webpack`). Where an implementation departs from its sketch, the section says so. User-facing pages: [docs/tools/](tools).
 
 ### 7.1 Vite 8, Vitest 5, Storybook (builder-vite), React Router 8, Remix, Astro
 
@@ -950,7 +1007,7 @@ const optimizerTripwire = (p) => ({ name: 'stunt-double:optimizer-tripwire',
 
 **Evidence.**
 
-- Alias to a `.jsx` shim with no plugin: the pre-bundle imports `/sdk-slots/gen/Button.jsx` externally and contains no project code [S].
+- Alias to a `.jsx` shim with no plugin: the pre-bundle imports `/.stunt-double/gen/Button.jsx` externally and contains no project code [S].
 - The full adapter shape in real Chromium: add, edit, swap and delete applied live (155–320 ms, Fast Refresh for edits, 0–1 reloads); typo and F1 overlays appeared and then cleared; a cold restart with an old `.vite` cache was correct; client and SSR matched [V on equivalent layouts].
 - Without `include` of the originals, the cold first load re-optimizes once [V].
 - Vitest 5 names its environment `__vitest__`, and the guard covers it [V].
@@ -988,6 +1045,8 @@ export function stuntDoubleEsbuild(opts = {}) {
 ```
 
 Zero-plugin alternative: `alias: stuntDoubleAlias()` (subpath keys → absolute shims) [V], with `stunt-double check &&` in the script.
+
+**Implementation notes** (`src/adapters/esbuild.mjs`, verified by `tests/esbuild.test.mjs`): the first build reuses the generation made in `setup`; `onStart` adds `[F6]` guards for `packages: "external"` and `external` entries matching the SDK; `onResolve` returns `watchDirs: [overridesDir]`, so watch / serve rebuild on override changes; once a build has problems, sockets resolve as external so esbuild does not add stale-shim resolve errors to the report.
 
 ### 7.3 webpack 5, Rspack 2, Rsbuild 2, Next `--webpack`, CRA via craco, Gatsby, Storybook `webpackFinal`
 
@@ -1031,6 +1090,7 @@ export class StuntDoublePlugin {
 }
 ```
 
+- **Implementation notes** (`src/adapters/webpack.mjs`, verified by `tests/webpack.test.mjs` and `tests/rspack.test.mjs`): `withStuntDouble()` also accepts an array (multi-compiler) or a function of `(env, argv)`; the gate's result is added in `finishModules` together with the audit; `[F6]` when the SDK became an external module (SSR `externals`); `watchRun` purges the overrides and shim directories from the cached input file system, or a fixed mistake keeps failing on a stale "Can't resolve" until restart [V].
 - **Never use `resolve.plugins`:** Rspack silently ignores it [V].
 - **Never replace modules in `afterResolve`:** loaders are then chosen for the old path and the build breaks [V].
 - **Rsbuild:** `resolve.dedupe` fixes F8 [V].
@@ -1038,22 +1098,30 @@ export class StuntDoublePlugin {
 ### 7.4 Next 16 (Turbopack default, `--webpack` opt-in)
 
 ```js
-// next.config.mjs:  export default withStuntDouble({ ...yourConfig })
-import { withStuntDouble as withWebpack } from 'stunt-double/webpack';
+// next.config.mjs:  export default withStuntDouble({ ...yourConfig })   (implementation: src/adapters/next.mjs)
 export function withStuntDouble(nextConfig = {}, opts = {}) {
-  const p = generate({ root: opts.root ?? process.cwd(), ...opts, onError: 'throw' });   // fails `next build` and `next dev` startup [V]
-  if (nextConfig.typescript?.ignoreBuildErrors) throw new Error('[X1] typescript.ignoreBuildErrors would skip the slot contract check (src/stunt-double.check.ts). Remove it.');
-  if (!p.tsconfigCoversCheckFile) throw new Error(`[X2] ${p.cfg.tsconfig} does not include ${p.rel(p.checkFile)}: next build would not type-check slot contracts.`);
-  const rel = './' + path.relative(p.root, p.genDir).split(path.sep).join('/');           // Turbopack silently ignores absolute targets [V]
-  return { ...nextConfig,
-    transpilePackages: [...new Set([...(nextConfig.transpilePackages ?? []), ...p.packages])],   // Pages Router would externalize the SDK [V]
-    turbopack: { ...nextConfig.turbopack, resolveAlias: { ...nextConfig.turbopack?.resolveAlias, [`${p.sdk.slotPackage}/*`]: `${rel}/*.jsx` } },
-    webpack(config, ctx) { const c = nextConfig.webpack ? nextConfig.webpack(config, ctx) : config; return withWebpack(c, { ...opts, typecheck: false }); } };
+  return async (phase, ctx) => {                                            // Next accepts an async phase function
+    const base = typeof nextConfig === 'function' ? await nextConfig(phase, ctx) : nextConfig;
+    const dev = phase === 'phase-development-server';
+    const p = generate({ root, ...opts, onError: dev ? 'poison' : 'return' });
+    if (phase === 'phase-production-build') {                               // the gate: before anything compiles
+      if (p.problems.length) throw new StuntDoubleError(formatProblems(p)); // `next build` exits 1 [V]
+      const r = await runTypeGate(p); if (!r.ok) throw new StuntDoubleError(r.message);   // ignoreBuildErrors cannot skip it [V]
+    } else if (dev) watchProject(p, …);                                     // live regeneration, no restart [V]
+    const rel = (f) => './' + path.relative(root, f);                       // Turbopack silently ignores absolute targets [V]
+    return { ...base,
+      transpilePackages: [...(base.transpilePackages ?? []), ...p.packages],                        // keep the SDK in the server bundle
+      turbopack: { ...base.turbopack, resolveAlias: { ...base.turbopack?.resolveAlias,
+        ...Object.fromEntries(p.slots.map((s) => [`${p.sdk.slotPackage}/${s}`, rel(p.shimFile(s))])) } },   // exact, one per slot
+      webpack: (config, wctx) => withWebpack(base.webpack ? base.webpack(config, wctx) : config, { ...opts, typecheck: false }) };
+  };
 }
 ```
 
+**Departures from the original sketch** (which relied on Next's own type check of `src/stunt-double.check.ts` and refused `ignoreBuildErrors` as X1): the check file now lives in `.stunt-double/`, outside Next's program, so the adapter runs the gate itself at config load. X1 is therefore no longer an error, and `typescript.ignoreBuildErrors` only skips Next's own check. `[F6]` is reported when `serverExternalPackages` lists the SDK. The aliases are exact per slot rather than one wildcard, so an unknown socket falls through to the placeholder.
+
 - **Turbopack has no resolver API**; only `resolveAlias` and loaders exist [V]. That is why the decision must be static: a wildcard alias to file content. A wildcard alias with a `./` target works [V]. Absolute or missing targets fall back *silently*, but here a missing target cannot happen: shims exist for every slot, and a typo'd *directory* would leave the placeholder on the path.
-- **Dev:** `"dev": "stunt-double watch -- next dev"` regenerates shims, and Turbopack picks up content changes. Add, swap and remove work without a restart; mistakes become an HTTP 500 carrying the poison text [V].
+- **Dev:** the adapter's in-process watcher regenerates shims (`stunt-double watch -- next dev` remains an alternative), and Turbopack picks up content changes, including in the root-level `.stunt-double/` dot-directory. Add, swap and remove work without a restart; mistakes become an HTTP 500 carrying the poison text [V, checked by hand with next 16.4.0].
 - **Optional, for live errors without the wrapper:** a validation loader on the SDK entry with `addContextDependency(overridesDir)` [V mechanism].
 - **Only `browser` aliases are honoured by Turbopack**, and other condition keys are silently ignored [V]. stunt-double never uses conditional resolution, so the server and client graphs cannot split.
 
@@ -1072,6 +1140,8 @@ export function withStuntDouble(config = {}, opts = {}) {
 ```
 
 The universal tier also works in Jest with no mapper, because jest-resolve follows realpaths [V]. ts-jest is not a gate: it has no TS 7 support and forces Node10 resolution [V]. Use babel-jest or @swc/jest.
+
+**Implementation notes** (`src/adapters/jest.mjs`, verified in `tests/webpack.test.mjs`): `withStuntDouble()` returns an async config (Jest accepts one) and throws the report at config load, so `jest` exits 1 before any test runs; the contract gate is opt-in (`{ typecheck: true }`), since babel-jest and @swc/jest never type-check (R3).
 
 ### 7.6 Metro (React Native / Expo)
 
@@ -1095,7 +1165,7 @@ F5 is runtime-only natively in Metro [V], so release builds chain `stunt-double 
 
 | Tool | Setup | Notes |
 |---|---|---|
-| **Parcel 2** | Universal tier plus `"@parcel/resolver-default": { "packageExports": true }` [V]. Optional resolver plugin `stunt-double/parcel` (`loadConfig` runs `generate`, and a throw fails `parcel build` [V]; `invalidateOnFileCreate` on the overrides dir). Scripts: `stunt-double check && parcel build` | A root `alias` with a typo'd key is silently ignored [V], so stunt-double never uses Parcel `alias`. `rsc:auto` keeps directives off (R5). |
+| **Parcel 2** | Resolver plugin `stunt-double/parcel`, loaded from a one-line local `parcel-resolver-stunt-double.mjs` (Parcel rejects plugin packages not named `parcel-resolver-*`), plus `"@parcel/resolver-default": { "packageExports": true }`. `loadConfig` runs `generate`, the `[F6]` guards and, in production, the gate; a throw fails `parcel build` [V `tests/parcel.test.mjs`]; `invalidateOnFileCreate` on the overrides dir. The universal tier works too (`stunt-double check && parcel build`) [V] | A root `alias` with a typo'd key is silently ignored [V], so stunt-double never uses Parcel `alias`. `rsc:auto` keeps directives off (R5). |
 | **Bun** | Bundler: `Bun.build({ plugins: [stuntDoubleBun()] })`; `onResolve` sees bare specifiers there [V]. Runtime and `bun test`: tsconfig `paths` or the `workspace:*` link [V]. Never a runtime `onResolve` plugin: it never sees bare specifiers [V]. Scripts: `stunt-double check && bun build …` | The `bun build` CLI cannot load plugins; use a script [V]. |
 | **Farm** | Universal tier; the Vite plugin through Farm's Vite compatibility [U] | |
 | **Unknown bundler** | Universal tier: the link, `stunt-double check && <build>`, tsconfig `paths` | Needs only standard `exports` resolution, realpath symlinks (or PnP), and a JS parser for `.jsx`. If it ignores the link, it fails on the placeholder: fail-closed. |
@@ -1134,7 +1204,7 @@ The practical rule that follows: **use the adapter for every tool that has one**
 | `stunt-double ls` / `stunt-double why Button` | Slot table: required, kind, effective implementation, contract JSDoc. `why` prints the chain, e.g. `EFFECTIVE src/overrides/Button.tsx → wraps @acme/core/original/Button` |
 | `stunt-double eject Button [--wrap \| --replace]` | Writes a typed starter (§4.3). For a *required* slot the template references `TODO_implement_Logo`, so it fails the gate instead of rendering null |
 | `stunt-double doctor` | Everything above, plus: tsconfig really includes the check file (`tsc --listFilesOnly`), adapter present in each detected tool config, scripts chained for adapter-less tools, PnP + TS 7, package-manager link form, `preserveSymlinks` off, no `.vite/deps` region from the project |
-| `stunt-double init` | Detects the package manager and tools; writes the dependency line, stub, `.gitignore`, tsconfig `paths` + `files`, `postinstall`, and adapter lines into vite / next / webpack / jest / vitest configs (prints the rest) |
+| `stunt-double init [--plugin] [--editor] [--ci] [--universal]` | Optional extras only (no flag lists them): `--plugin` adds the adapter line where it can (prints the rest), `--editor` the check file in the app tsconfig + `postinstall`, `--ci` a CI recipe, `--universal` the package link and committed stub for tools without an adapter |
 | `stunt-double sdk-lint <dist>` / `stunt-double slotify` | SDK publish gate (§3.6) / degraded path (§11) |
 
 ### 8.2 HMR
@@ -1207,15 +1277,15 @@ Each layer below catches what the one before it cannot.
    - the slot package has no deps (no virtual copies or extra React).
 2. **RES** (no stunt-double code): placeholder poison for unwired tools and graphs; a missing shim for F3 and new required slots; native MISSING_EXPORT for F5.
 3. **STA at every adapter start**, plus postinstall and CLI: F2, F3, F4, F5, F6a, F6f, F6g, F7, W7, F8, F9b, L1, L2.
-4. **CFG:** SSR / Vitest / optimizer guards, X1, X2, X3.
+4. **CFG:** SSR / Vitest / optimizer guards, esbuild and webpack externals, Next `serverExternalPackages`, X2, X3.
 5. **TYP:** contracts for every implementation in every chain, plus the ABI pin, slot set and staleness probes.
 6. **AUD:** the final graph is checked against the table. It catches user aliases, resolver order, copies and bundle-level duplicates.
 7. **CI recipe** (every project):
 
    ```
-   npm ci                      # postinstall: stunt-double gen --no-fail
+   npm ci
    npx stunt-double check      # STA + TYP (fails on anything)
-   npm run typecheck           # the project's own tsc: includes src/stunt-double.check.ts
+   npm run typecheck           # the project's own tsc (includes .stunt-double/check.ts only with init --editor)
    npm run build               # adapter re-runs STA + TYP + AUD inside the tool
    npm test
    ```
@@ -1272,8 +1342,8 @@ The audit is mandatory here. Tools without an adapter would render defaults, so 
    - `sdk-lint` in publish CI;
    - publish the `@acme/core-slots` placeholder (non-prerelease version).
 
-   The changelog says: run `npx stunt-double init`.
-2. **Adopt in each app, with no behaviour change:** `npm i @acme/core@1 && npm i -D stunt-double && npx stunt-double init`, then commit. With zero overrides every shim re-exports `original/*`, so output is identical. Run `stunt-double doctor` once and fix any F8 or wiring findings.
+   The changelog says: `npm i -D stunt-double` and add the adapter line for your tool.
+2. **Adopt in each app, with no behaviour change:** `npm i @acme/core@1 && npm i -D stunt-double`, add the adapter line, then commit. With zero overrides every shim re-exports `original/*`, so output is identical. Run `stunt-double doctor` once and fix any F8 or wiring findings.
 3. **Move existing customizations.** For each app-level wrapper or monkey patch, run `stunt-double eject X --wrap`, move the code in, and delete the old wrapper and any `resolve.alias` hacks. The F6g bypass rule and the audit flag stragglers. SDK-internal positions now get the customization too.
 4. **CI:** use the §10 recipe. Make `stunt-double check` a required status check.
 5. **SDK upgrades:** bump the SDK, then run `stunt-double check`.
@@ -1298,7 +1368,7 @@ The full record, including every graft and every evidence conflict, is in [DECIS
 
 **How it injects.** SDK components look up the implementation at render time: from a `slots` / `components` prop, or from a context provider the app mounts near the root.
 
-**Why it lost.** This is Swinject moved into React, so it fails the north star by design. The following points are design reasoning; this family was not lab-tested.
+**Why it lost.** This is a runtime DI container moved into React, so it fails the north star by design. The following points are design reasoning; this family was not lab-tested.
 
 - The decision is made while rendering, so a missing, misspelled or wrong registration surfaces only when the component renders.
 - A component rendered outside the provider, such as in a test or a second React root, silently gets the SDK default.
@@ -1387,7 +1457,7 @@ Design A fixed the validation and typing gaps with a declared manifest. It kept 
 - The contract shape was replaced with one that has no false positives on `FC`, `memo` or `forwardRef`.
 - The Vite helper became a real plugin.
 - Yarn PnP + TS 7 is now refused explicitly.
-- The shims moved to the root `sdk-slots/gen`.
+- The shims moved to the root `sdk-slots/gen` (later: `.stunt-double/gen`, self-ignoring, with the universal tier keeping `sdk-slots/`).
 - The static scans now always run.
 - A real-parser F7 walk was added.
 
@@ -1421,4 +1491,4 @@ Smaller gaps stated elsewhere in this document:
 - `notAsync` cannot flag an async body hidden behind a `React.FC` annotation (§6.2).
 - W7 (consumer cycle) is a warning, not an error.
 - A single-file bundled SDK cannot be injected at module level (§11).
-- Every claim tagged [U] is unverified until the reference implementation's acceptance tests cover it. The untested areas (Windows, multiple SDKs with slots in one app, `kind:"server"` contracts, the Turbopack alias into a root-level `sdk-slots/` directory, and more) are listed as open questions in [DECISIONS.md](DECISIONS.md#open-questions).
+- Every claim tagged [U] is unverified until the reference implementation's acceptance tests cover it. The untested areas (Windows, multiple SDKs with slots in one app, `kind:"server"` contracts, and more) are listed as open questions in [DECISIONS.md](DECISIONS.md#open-questions).

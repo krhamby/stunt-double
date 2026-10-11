@@ -1,0 +1,2 @@
+# written by next build / next dev (it differs between the two), as create-next-app ignores it
+next-env.d.ts

@@ -10,7 +10,7 @@ import { packageManager } from './pm.mjs';
 import { STANDARD_RENDER, STANDARD_BUNDLE, assertFailed, assertPassed, assertMessages, assertRender, assertBundle } from './expect.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, listTree, writeJson } from './util.mjs';
-import { catalogue } from '../mutations/index.mjs';
+import { catalogue, runsInEverySuite } from '../mutations/index.mjs';
 
 const MINUTE = 60_000;
 export const TYPESCRIPT5 = Object.freeze({ alias: 'typescript5', spec: 'npm:typescript@5.9.3' });
@@ -20,6 +20,8 @@ export const TYPESCRIPT5 = Object.freeze({ alias: 'typescript5', spec: 'npm:type
  * @param {string} spec.name             suite name ('vite', 'webpack', ...): test names + work dir
  * @param {string} spec.fixtureDir       the example app, relative to the repo root
  * @param {string} [spec.family]         tool family; enables family-only mutations (e.g. 'vite')
+ * @param {boolean} [spec.reference]     run the WHOLE catalogue (one suite: vite); others run the per-tool
+ *        subset (tests/mutations/index.mjs runsInEverySuite)
  * @param {string} [spec.toolConfig]     the tool's config file (family mutations edit it), e.g. 'vite.config.ts'
  * @param {string} [spec.pm]             package manager (default 'npm')
  * @param {object} spec.commands         shell commands, run in the app with node_modules/.bin on PATH:
@@ -33,10 +35,10 @@ export const TYPESCRIPT5 = Object.freeze({ alias: 'typescript5', spec: 'npm:type
  * @param {object} [spec.unwired]        { files: { rel: text }, command }: a config of this tool WITHOUT the adapter
  * @param {object|Function} [spec.expectations]  per-mutation overrides: { F1a: { command: 'checkThenBuild' },
  *        F5a: { outcome: 'pass', residual: 'why' }, F6c: 'skip reason' } or (mutation, expect) => override
- * @param {(list) => list} [spec.mutations]  filter/extend the applicable catalogue
+ * @param {(list, catalogue) => list} [spec.mutations]  filter/extend the applicable mutations
  * @param {boolean|object} [spec.typescript5]  also run the type-gate mutations with TypeScript 5.9 (npm alias)
  * @param {object} [spec.universal]      universal tier: { files, build, bare, mutations: [ids] } (see README)
- * @param {string[]} [spec.outputs]      build output dirs the build may create (simplicity-bar check)
+ * @param {string[]} [spec.outputs]      build output dirs (or single files, e.g. next-env.d.ts) the build may write
  * @param {string} [spec.generatedDir]   where stunt-double may write generated files (default '.stunt-double')
  */
 export function defineToolSuite(spec) {
@@ -108,8 +110,8 @@ function normalize(spec) {
   commands.checkThenBuild ??= `${commands.check} && ${commands.build}`;
   if (spec.unwired) commands.unwired ??= spec.unwired.command;
   const has = (need) => (need === 'unwired' ? !!spec.unwired : !!commands[need]);
-  let mutations = catalogue.filter((m) => !m.family || m.family === spec.family);
-  if (spec.mutations) mutations = spec.mutations(mutations);
+  let mutations = catalogue.filter((m) => (!m.family || m.family === spec.family) && (spec.reference || runsInEverySuite(m)));
+  if (spec.mutations) mutations = spec.mutations(mutations, catalogue);
   const ts5 = spec.typescript5 === true ? {} : spec.typescript5 || null;
   return {
     pm: 'npm',
@@ -214,7 +216,8 @@ function assertSimplicityBar(fx, suite) {
   const allowed = [...suite.outputs, suite.generatedDir].map((d) => `${d.replace(/\/$/, '')}/`);
   const problems = [];
   for (const f of listTree(fx.app)) {
-    if (allowed.some((a) => f.startsWith(a))) continue;
+    if (allowed.some((a) => f.startsWith(a)) || suite.outputs.includes(f)) continue; // an output dir, or a generated file
+    if (fx.pm.installState.some((x) => f === x || f.startsWith(`${x}/`))) continue; // the package manager's install (e.g. Yarn PnP)
     if (!pristine.has(f)) problems.push(`created ${f}`);
     else if (fs.readFileSync(path.join(fx.app, f), 'utf8') !== fs.readFileSync(path.join(fx.pristine, f), 'utf8')) problems.push(`modified ${f}`);
   }
@@ -297,10 +300,12 @@ function defineUniversal(suite, mainFx, results) {
       transform(new FileOps(mainFx.app)); // the edits of the universal tier, without reinstalling
       const c = await step(mainFx, record, t, suite.commands.check);
       assertFailed(c, 'stunt-double check: ');
-      assertMessages(c, [/\[F6\][^\n]*placeholder/]);
+      // npm / pnpm install the registry placeholder for the missing peer; Yarn installs no peers, so the SDK
+      // cannot resolve the slot package at all. Both are the wiring self-test's [F6].
+      assertMessages(c, [/\[F6\][^\n]*(placeholder|cannot resolve @acme\/core-slots)/]);
       const b = await step(mainFx, record, t, u.bare);
       assertFailed(b, 'bare build: ');
-      assertMessages(b, [/STUNT-DOUBLE-NOT-WIRED/]);
+      assertMessages(b, [/STUNT-DOUBLE-NOT-WIRED|tried to access @acme\/core-slots \(a peer dependency\)/]);
       record.status = 'ok';
     });
 
@@ -310,7 +315,7 @@ function defineUniversal(suite, mainFx, results) {
       await fx.reset();
       await fx.useSdk();
       fx.remove(fx.override('PriceTag.tsx'));
-      const g = await step(fx, record, t, 'stunt-double gen');
+      const g = await step(fx, record, t, `${fx.pm.exec('stunt-double')} gen`);
       assertPassed(g, 'stunt-double gen: ');
       fx.write(fx.override('PriceTg.tsx'), fx.pristineText(fx.override('PriceTag.tsx')));
       const bare = await step(fx, record, t, u.bare);

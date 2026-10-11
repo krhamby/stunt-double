@@ -162,13 +162,48 @@ B's other structural choices are also kept:
 
 ---
 
+## 8. Value slots (after the first milestone)
+
+The north star is about *injection* mistakes, and an SDK injects more than components: analytics, API clients, formatters, feature configuration. Runtime DI containers such as InversifyJS or tsyringe register any type. The first milestone only checked components, so everything else still needed a runtime registry, which is exactly the failure mode this project removes.
+
+**Decision: a fourth slot kind, `value`, on the same mechanism.** Sockets, shims, the alias, the placeholder, the dist scan, the audit and every adapter are kind-agnostic: a shim re-exports a binding, whatever it is. Only the contract changes: `SlotTypes['X']` (the whole type) instead of `SlotProps['X']` (props). Kinds a tool version does not know fail generation (`[SETUP]`), so an older stunt-double can never check a new kind against the wrong contract.
+
+**Alternatives rejected:**
+- *A separate "services" mechanism* (a generated registry object, or a provider). It would put the decision back at runtime, or add a second resolution path to verify in every tool.
+- *Plain assignability as the contract.* It accepts a narrowed method parameter even under `strict`, and a narrowed function parameter with strict off (DESIGN §6.6). The check file adds `argsFit`, which compares argument tuples. That comparison is strict-independent, it was verified in TS 7.0.2 and 5.9.3 with strict on and off [S], and it has no false positives on fewer, optional, rest or generic parameters, class instances or constructors.
+- *Forcing `strictFunctionTypes` in the gate's tsconfig.* It would still miss methods (they are bivariant by design), and it would type-check the override files under different rules than the app.
+
+**Evidence:** the core unit tests (`value-slots.test.mjs`, real tsc, strict on and off) and the Vite suite's V1a–V7 scenarios. Those run on the fixture SDK's `formatPrice` (a function its checkout total calls) and `analytics` (a service object its ProductCard calls), under TypeScript 7 and 5.9, plus two scenarios in the universal tier.
+
+---
+
+## 9. The adapter build-out: what the real tools decided
+
+Each adapter below was built against a real app and run through the whole shared mistake catalogue (`tests/<tool>.test.mjs`). Where the tool contradicted the original sketch, the tool won; these are the resulting decisions.
+
+| Tool | Decision | Why (observed) |
+|---|---|---|
+| Next 16 | Run the contract gate in the adapter's config function at `phase-production-build`; X1 is no longer an error | The check file moved out of `src/`, so Next's own type check never sees it. Gating at config load also fails the build before anything compiles, for Turbopack and `--webpack` alike |
+| Next 16 | One exact `./`-relative `turbopack.resolveAlias` per slot, into the root-level dot-directory `.stunt-double/gen` | Works in `next build` and `next dev` (live add / fix / remove / restore) [V]; an unknown socket falls through to the placeholder |
+| webpack / Rspack | `watchRun` purges the overrides and shim *directories* from the input file system | Purging only changed shims left a stale "file missing" stat: a fixed mistake kept failing until restart [V] |
+| webpack / Rspack / Rsbuild | `[F6]` when the SDK becomes an `ExternalModule` | SSR `externals` (webpack-node-externals, Rsbuild `output.externals`) would load the SDK natively at runtime |
+| esbuild | A native plugin; sockets resolve as external once a build already failed | esbuild's CLI cannot load plugins; esbuild otherwise piles stale-shim resolve errors onto the report |
+| Bun | A `Bun.build()` plugin with an `onEnd` audit of the metafile | Bun 1.4 writes esbuild's metafile format and a plugin can turn it on; runtime plugins still never see bare specifiers, so the runtime stays universal tier |
+| Jest | An async config; the gate is opt-in | babel-jest / @swc/jest never type-check; the build or `stunt-double check` is the gate (R3) |
+| Storybook | The Vite plugin, picked up from `vite.config.ts`; the report also goes to stderr verbatim | Storybook's logger word-wraps errors at 80 columns, splitting `[Fx]` lines |
+| Parcel | A resolver from a one-line local `parcel-resolver-*.mjs`; the plugin object is built without `@parcel/plugin`; the app root is the working directory | Parcel rejects plugin packages with other names; strict package managers would not let stunt-double reach `@parcel/plugin`; Parcel tells plugins only the monorepo root |
+| Yarn PnP | The gate's `tsc` child keeps `--require .pnp.cjs`; TypeScript 5.9 must be the project's own `typescript` | Without the hook `tsc` cannot be read from the zip cache. Yarn patches only the package named `typescript`, so the previously documented `typescript5` alias could never resolve under PnP |
+| pnpm | A `file:` dependency on a slot-package *tarball* is an install, not a universal-tier link | Generation tried to write into the `.tgz` (found by the pnpm suite) |
+
+---
+
 ## Open questions
 
 These are to be settled by the reference implementation's acceptance tests.
 
 - What does the type gate cost on a large real app, where overrides import much of the app graph (TS 7 vs TS 5.9)? Should the gate's program stop at override boundaries (for example, isolate overrides behind declaration-only imports) if it exceeds ~2 s?
-- Turbopack with the alias target in a root-level non-dot directory (`./sdk-slots/gen/*.jsx`) and Next dev picking up shim content changes: verified for other directory names only. Confirm, or move the shims under `src/`.
-- webpack-dev-server / Rspack dev server: regenerating shims in `watchRun` and purging the input file system. Is the new shim content picked up in the same compilation, or does it need one extra rebuild (or the `stunt-double watch --` wrapper)?
+- ~~Turbopack with the alias target in a root-level directory and Next dev picking up shim content changes.~~ **Answered:** exact `./`-relative aliases into the root-level dot-directory `.stunt-double/gen/` work in `next build` and `next dev` (next 16.4.0; `tests/next.test.mjs`, and add / fix / remove / restore an override live in `next dev` by hand).
+- webpack-dev-server / Rspack dev server: regenerating shims in `watchRun` and purging the input file system. **Partly answered:** with `webpack --watch` (webpack 5.111.1), the new shim content is picked up, and a fixed mistake recovers once `watchRun` purges the overrides and shim directories (not only the changed shims). The shim rewrite triggers one extra compilation. Not yet run under webpack-dev-server or the Rspack dev server.
 - Parcel 2.16.4 duplicated React across `'use client'` bundle splits for a node target. Does the same happen for browser targets with an RSC-annotated SDK, and should the Parcel adapter refuse SDK directives?
 - Should the SDK ship a CJS `require` condition so Jest below Node 24.9 needs no `transformIgnorePatterns`, and is ts-jest (Node10 resolution) worth supporting via top-level `types`?
 - Multiple SDKs with slots in one app (two socket packages, two slot dirs): is a single config with an `sdks` array enough, and how do cross-SDK slots interact?
@@ -177,5 +212,6 @@ These are to be settled by the reference implementation's acceptance tests.
 - Can TypeScript 7 (tsgo) Yarn PnP support, and the tsgo LSP's go-to-definition through tsconfig `paths` into generated `.d.ts`, be relied on in later 7.x releases?
 - Windows: realpath/junction behaviour of npm `file:` links, recursive `fs.watch`, alias regex path separators, and case-insensitive F2/F4 scanning are all untested.
 - npm workspaces with several apps: is adapter-only wiring (no link) acceptable everywhere, or should `init` use `install-strategy=nested` / per-app installs to keep the universal tier?
+- Value slots: should `argsFit` recurse into nested objects (`client.users.get(id)`) and check every overload of an overloaded function? Today it checks top-level members, and `Parameters<>` sees only the last overload. A `kind: "value"` server-only service (an override importing `server-only`) is allowed; does any RSC setup need a dedicated server-value kind?
 - W7 consumer-cycle detection: should it be an error when the consumer always renders the slot (the manifest could mark `alwaysRenders`), or stay a warning?
-- Metro/Expo, Storybook webpack builder, Gatsby, Farm, Astro and React Router 8 adapters are designed from host APIs and lab evidence only. Which of them should be in the first reference-implementation milestone?
+- Metro/Expo, Storybook webpack builder, Gatsby, Farm, Astro and React Router 8 adapters are designed from host APIs and lab evidence only. **Partly answered:** esbuild, webpack 5, Rspack 2, Next 16 (Turbopack and `--webpack`) and Jest 30 now have adapters and toolchain suites; the rest remain designed.

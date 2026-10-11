@@ -3,7 +3,9 @@
   "slots": {
     "Button": { "kind": "client" },
     "PriceTag": { "kind": "client" },
-    "Logo": { "kind": "client", "required": true }
+    "Logo": { "kind": "client", "required": true },
+    "formatPrice": { "kind": "value" },
+    "analytics": { "kind": "value" }
   },
   "removedSlots": {}
 }

@@ -12,16 +12,14 @@
 //   buildEnd        AUD: post-bundle graph audit -> this.error
 //   dev             regenerate on change, poisoned shims + overlay push, async type gate
 import path from 'node:path';
-import { generate, StuntDoubleError } from '../core/generate.mjs';
-import { emitPoison } from '../core/emit.mjs';
+import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, rollupGraph } from '../core/audit.mjs';
-import { formatProblems, formatWarnings, formatReport, header } from '../core/diagnostics.mjs';
-import { DEFAULTS } from '../core/config.mjs';
+import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
+import { adapterOptions } from '../core/config.mjs';
 import { esc, cleanId } from '../core/util.mjs';
 
 const PLUGIN = 'stunt-double';
-const PLUGIN_OPTIONS = new Set(['typecheck', 'audit', 'root', 'configFile', ...Object.keys(DEFAULTS)]);
 
 const covered = (list, name) => list === true || [].concat(list ?? []).some((x) => (x instanceof RegExp ? x.test(name) : x === name));
 
@@ -45,24 +43,22 @@ export function stuntDouble(opts = {}) {
   let checkedAtConfig = false;
   let viteConfigured = false;
   const vitest = !!process.env.VITEST;
-  const { typecheck = true, audit = true, ...genOpts } = opts ?? {};
-  const unknownOptions = Object.keys(opts ?? {}).filter((k) => !PLUGIN_OPTIONS.has(k));
-  const optionProblems = unknownOptions.map((k) => `[CFG] unknown stuntDouble() option "${k}". Known options: ${[...PLUGIN_OPTIONS].join(', ')}.`);
-  const load = (root, onError) => {
-    if (!optionProblems.length) return generate({ ...genOpts, root, onError });
-    const next = generate({ ...genOpts, root, onError: 'return' });
-    next.problems.unshift(...optionProblems);
-    if (onError === 'poison') { next.changedFiles = emitPoison(next, next.problems); next.poisoned = true; }
-    if (onError === 'throw') throw new StuntDoubleError(formatProblems(next), next.problems);
-    return next;
+  const { flags: { typecheck, audit }, genOpts } = adapterOptions('stuntDouble()', opts, { typecheck: true, audit: true });
+  const load = (root, onError) => generate({ ...genOpts, root, onError });
+  // Storybook (builder-vite) prints a build error through its own logger, which word-wraps at 80 columns and
+  // breaks file paths and [Fx] lines apart. Under Storybook the report also goes to stderr verbatim.
+  let storybook = false;
+  const raise = (message, lines = []) => {
+    if (storybook) process.stderr.write(`${message}\n`);
+    throw new StuntDoubleError(message, lines);
   };
-  const fail = (lines) => { throw new StuntDoubleError(formatReport(header(p, lines.length), lines), lines); };
+  const fail = (lines) => raise(formatProblems(p, lines), lines);
 
   const tripwire = {
     name: `${PLUGIN}:optimizer-tripwire`,
     load(id) {
       if (p?.sdk && p.isProjectSlotFile(cleanId(id)))
-        this.error(reportError(formatReport(header(p, 1), [`[F6] the dependency optimizer tried to pre-bundle ${p.rel(cleanId(id))}: the override decision would be frozen into .vite/deps. Remove custom optimizeDeps settings that pull in ${p.sdk.slotPackage}.`])));
+        this.error(reportError(formatProblems(p, [`[F6] the dependency optimizer tried to pre-bundle ${p.rel(cleanId(id))}: the override decision would be frozen into .vite/deps. Remove custom optimizeDeps settings that pull in ${p.sdk.slotPackage}.`])));
     },
   };
 
@@ -74,7 +70,7 @@ export function stuntDouble(opts = {}) {
     config(user, env) {
       command = env?.command ?? 'build';
       viteConfigured = true;
-      const root = path.resolve(user.root ?? opts.root ?? process.cwd());
+      const root = path.resolve(user.root ?? genOpts.root ?? process.cwd());
       p = load(root, vitest ? 'throw' : command === 'serve' ? 'poison' : 'return');
       if (!p.sdk) return {}; // fail closed: configResolved / the dev overlay report it, nothing is aliased
       const pk = p.packages;
@@ -100,8 +96,9 @@ export function stuntDouble(opts = {}) {
 
     // ---- CFG guards ---------------------------------------------------------------------------------
     async configResolved(c) {
+      storybook = (c.plugins ?? []).some((x) => String(x?.name ?? '').startsWith('storybook:'));
       if (!p?.sdk) {
-        if (command === 'build' && !vitest && p?.problems.length) throw new StuntDoubleError(formatProblems(p), p.problems);
+        if (command === 'build' && !vitest && p?.problems.length) raise(formatProblems(p), p.problems);
         return;
       }
       const pk = p.packages;
@@ -127,11 +124,11 @@ export function stuntDouble(opts = {}) {
       // prints it as the bare report (exit 1). The same failure from buildStart would reach the terminal wrapped
       // in Rolldown's aggregate error and its stack trace.
       if (command === 'build' && !vitest) {
-        if (p.problems.length) throw new StuntDoubleError(formatProblems(p), p.problems);
-        if (typecheck !== false) {
+        if (p.problems.length) raise(formatProblems(p), p.problems);
+        if (typecheck) {
           gate ??= runTypeGate(p);
           const r = await gate;
-          if (!r.ok) throw new StuntDoubleError(r.message, r.lines ?? []);
+          if (!r.ok) raise(r.message, r.lines);
         }
         checkedAtConfig = true;
       }
@@ -140,24 +137,22 @@ export function stuntDouble(opts = {}) {
     // ---- Rollup / Rolldown standalone: no config hook ran ------------------------------------------
     options() {
       if (viteConfigured) return null; // Vite: config() already generated
-      p = load(path.resolve(opts.root ?? process.cwd()), 'return'); // every standalone build regenerates
+      p = load(path.resolve(genOpts.root ?? process.cwd()), 'return'); // every standalone build regenerates
       return null;
     },
     resolveId(source) {
       // Vite applies the alias from config(); Rollup/Rolldown standalone has no alias, so resolve here.
-      if (!p?.sdk || !source.startsWith(p.sdk.slotPackage + '/')) return null;
-      const slot = source.slice(p.sdk.slotPackage.length + 1);
-      return p.sdk.slots[slot] ? p.shimFile(slot) : null;
+      return p?.sdk ? p.socketShim(source) : null;
     },
 
     // ---- build: STA + TYP ---------------------------------------------------------------------------
     async buildStart() {
       if (command === 'serve' || vitest) return;
       if (checkedAtConfig) { checkedAtConfig = false; return; } // first build of `vite build`: already checked
-      if (this.meta?.watchMode) { p = load(p.root, 'return'); gate = null; } // `vite build --watch` rebuilds
+      if (this.meta?.watchMode) { p = regenerate(p, { onError: 'return' }); gate = null; } // `vite build --watch` rebuilds
       if (p.problems.length) this.error(reportError(formatProblems(p)));
       if (p.warnings.length && !warned) { warned = true; this.warn(formatWarnings(p)); }
-      if (typecheck === false) return;
+      if (!typecheck) return;
       gate ??= runTypeGate(p);
       const r = await gate;
       if (!r.ok) this.error(reportError(r.message));
@@ -165,7 +160,7 @@ export function stuntDouble(opts = {}) {
 
     // ---- build: AUD ---------------------------------------------------------------------------------
     buildEnd(err) {
-      if (err || command === 'serve' || vitest || audit === false || !p?.sdk) return;
+      if (err || command === 'serve' || vitest || !audit || !p?.sdk) return;
       const problems = auditGraph(p, rollupGraph(this));
       if (problems.length) this.error(reportError(formatProblems(p, problems)));
     },
@@ -188,7 +183,7 @@ export function stuntDouble(opts = {}) {
       try { s.ws?.on?.('connection', () => { if (lastError) setTimeout(() => send(lastError), 50); }); } catch {}
       let seq = 0;
       const checkTypes = async () => {
-        if (typecheck === false || p.problems.length) return;
+        if (!typecheck || p.problems.length) return;
         const mine = ++seq;
         const r = await runTypeGate(p);
         if (mine !== seq) return; // a newer edit started another run: its result wins
@@ -204,7 +199,7 @@ export function stuntDouble(opts = {}) {
         if (!p.watches(file)) return;
         clearTimeout(t);
         t = setTimeout(() => {
-          try { p = load(p.root, 'poison'); } catch (e) { return push(String(e?.message ?? e)); }
+          try { p = regenerate(p, { onError: 'poison' }); } catch (e) { return push(String(e?.message ?? e)); }
           if (p.problems.length) { seq++; return push(formatProblems(p)); }
           clear();
           checkTypes().catch(() => {});

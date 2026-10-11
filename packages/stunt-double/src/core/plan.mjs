@@ -29,9 +29,10 @@ export function buildPlan({ root, sdk, cfg, claims, layers, overridesDir, tsconf
     table[slot] = { slot, kind, required: !!meta.required, exportName, chain, impl: chain[0] ?? null, wraps: false };
     if (appClaims.length > 1) continue; // F4 already reported by the scan
     if (!chain.length) {
+      const ext = kind === 'value' ? '.ts' : '.tsx';
       problems.push(meta.required
-        ? `[F3] required slot "${slot}" has no implementation: create ${overridesRel}/${slot}.tsx exporting \`${exportName}\` (scaffold: npx stunt-double eject ${slot}).`
-        : `[F3] slot "${slot}" has no implementation and ${sdk.name}@${sdk.version} ships no default for it: create ${overridesRel}/${slot}.tsx exporting \`${exportName}\`.`);
+        ? `[F3] required slot "${slot}" has no implementation: create ${overridesRel}/${slot}${ext} exporting \`${exportName}\` (scaffold: npx stunt-double eject ${slot}).`
+        : `[F3] slot "${slot}" has no implementation and ${sdk.name}@${sdk.version} ships no default for it: create ${overridesRel}/${slot}${ext} exporting \`${exportName}\`.`);
       continue;
     }
     for (const impl of chain) {

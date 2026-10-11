@@ -3,6 +3,7 @@ export { defineToolSuite, universalTransform, TYPESCRIPT5 } from './suite.mjs';
 export { Fixture, FileOps, DEFAULT_SDK, DEFAULT_LAYOUT } from './fixture.mjs';
 export { STANDARD_RENDER, STANDARD_BUNDLE, assertFailed, assertPassed, assertMessages, assertRender, assertBundle } from './expect.mjs';
 export { viteDevProbe } from './vite-dev.mjs';
+export { watchProbe } from './watch-probe.mjs';
 export { PACKAGE_MANAGERS, packageManager } from './pm.mjs';
 export { run, REPO_ROOT, PACKS_DIR, WORK_ROOT } from './util.mjs';
 export { parseRenderOutput, summarize, compareRender, markers, RENDER_LINE } from './markers.mjs';

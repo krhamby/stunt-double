@@ -1,6 +1,6 @@
 // Package managers the harness can install a fixture with, and how each one spells the universal-tier link
-// (DESIGN.md §4.4). Only npm is exercised by the suites in this repository so far; the other rows are the
-// documented commands, ready for a package-manager suite to use (and correct if reality differs).
+// (DESIGN.md §4.4). npm (every suite), pnpm (tests/vite-pnpm.test.mjs) and Yarn 4 PnP (tests/vite-yarn-pnp.test.mjs)
+// are exercised; the bun row is the documented commands, ready for a suite to use (and correct if reality differs).
 export const PACKAGE_MANAGERS = {
   npm: {
     install: 'npm install --prefer-offline --no-audit --no-fund --loglevel=error',
@@ -11,6 +11,8 @@ export const PACKAGE_MANAGERS = {
     run: (script) => `npm run --silent ${script}`,
     exec: (bin) => `npx --no-install ${bin}`,
     verified: true,
+    /** what an install leaves next to package.json, kept across per-scenario resets; the first one marks it */
+    installState: ['node_modules'],
   },
   pnpm: {
     install: 'pnpm install --prefer-offline --config.confirmModulesPurge=false',
@@ -19,16 +21,19 @@ export const PACKAGE_MANAGERS = {
     workspaces: false,
     run: (script) => `pnpm run --silent ${script}`,
     exec: (bin) => `pnpm exec ${bin}`,
-    verified: false,
+    verified: true,
+    installState: ['node_modules'],
   },
   yarn: {
-    install: 'yarn install',
+    // Yarn 4 through Corepack (the fixture's "packageManager" field picks the version; a global `yarn` is often 1.x)
+    install: 'corepack yarn install --no-immutable', // CI=true makes Yarn immutable; fixtures install fresh
     lockfile: 'yarn.lock',
     link: (rel) => `portal:./${rel}`, // the stub must declare NO peers, or PnP makes a __virtual__ copy
     workspaces: false,
-    run: (script) => `yarn run ${script}`,
-    exec: (bin) => `yarn ${bin}`,
-    verified: false,
+    run: (script) => `corepack yarn run ${script}`,
+    exec: (bin) => `corepack yarn ${bin}`,
+    verified: true, // Plug'n'Play: tests/vite-yarn-pnp.test.mjs
+    installState: ['.pnp.cjs', '.pnp.loader.mjs', '.yarn', 'yarn.lock', 'node_modules'], // Yarn refuses to run without its lockfile
   },
   bun: {
     install: 'bun install',
@@ -38,6 +43,7 @@ export const PACKAGE_MANAGERS = {
     run: (script) => `bun run ${script}`,
     exec: (bin) => `bunx ${bin}`,
     verified: false,
+    installState: ['node_modules'],
   },
 };
 

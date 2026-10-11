@@ -8,6 +8,8 @@
 //   export { Button } from '@acme/core-slots/Button'   ->  export { Button } from './original/Button.js'
 //   export { Logo } from '@acme/core-slots/Logo'        ->  export declare const Logo: import("react").ComponentType<
 //     (required slot: the SDK ships no original)               import("./contracts.js").SlotProps["Logo"]>;
+//   export { api } from '@acme/core-slots/api'          ->  export declare const api: import("./contracts.js").SlotTypes["api"];
+//     (required VALUE slot: typed by its whole contract)
 //
 // Trade-off (documented): app code is typed by the SDK contract/original, so go-to-definition on `Button` lands on
 // the SDK original, and props an override adds beyond the contract are not visible through '@acme/core'.
@@ -18,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseSync } from 'oxc-parser';
 import { listFiles, posix, relSpec, globToRegExp, fileExists } from './util.mjs';
+import { isValueSlot } from './manifest.mjs';
 
 const DTS = /\.d\.[cm]?ts$/;
 
@@ -93,7 +96,10 @@ export function rewriteDtsFile({ file, pkgDir, manifest, contracts }) {
   const contractType = (s) => {
     if (!contracts) { errors.push(`[SDK6] ${rel}: required slot "${s}" needs the published contracts (exports "./contracts" types) to declare its type.`); return 'never'; }
     const spec = relSpec(dir, contracts).replace(/\.d\.([cm]?)ts$/, '.$1js');
-    return `import("react").ComponentType<import("${spec}").SlotProps[${JSON.stringify(s)}]>`;
+    // a value slot is typed by its whole contract; a component slot is a component of its props
+    return isValueSlot(manifest.slots[s])
+      ? `import("${spec}").SlotTypes[${JSON.stringify(s)}]`
+      : `import("react").ComponentType<import("${spec}").SlotProps[${JSON.stringify(s)}]>`;
   };
   const edits = [];
   const unknown = (s) => { errors.push(`[SDK2] ${rel}: references socket "${sp}/${s}", which is not a slot in slot-manifest.json.`); };
@@ -135,7 +141,7 @@ export function rewriteDtsFile({ file, pkgDir, manifest, contracts }) {
     if (!manifest.slots[s]) return void unknown(s);
     const orig = original(s);
     if (orig) edits.push([lit.start, lit.end, `${src[lit.start]}${orig}${src[lit.start]}`]);
-    else if (!manifest.slots[s].default) errors.push(`[SDK6] ${rel}: ${src.slice(n.start, n.end)} refers to required slot "${s}" by inference: give that declaration an explicit type (e.g. SlotProps["${s}"]).`);
+    else if (!manifest.slots[s].default) errors.push(`[SDK6] ${rel}: ${src.slice(n.start, n.end)} refers to required slot "${s}" by inference: give that declaration an explicit type (e.g. ${isValueSlot(manifest.slots[s]) ? 'SlotTypes' : 'SlotProps'}["${s}"]).`);
   });
   edits.sort((a, b) => b[0] - a[0]);
   let text = src;

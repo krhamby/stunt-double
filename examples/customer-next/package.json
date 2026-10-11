@@ -1,0 +1,30 @@
+{
+  "name": "customer-next",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A project that injects its own components and services into @acme/core with stunt-double (Next.js 16, App Router; Turbopack and --webpack).",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "build:webpack": "next build --webpack",
+    "start": "next start",
+    "probe": "node probes/render.mjs"
+  },
+  "dependencies": {
+    "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
+    "typescript": "7.0.2"
+  },
+  "overrides": {
+    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz"
+  }
+}

@@ -6,7 +6,7 @@ import { plural, posix } from './util.mjs';
 export const DOCS_BASE = 'https://github.com/krhamby/stunt-double/blob/main/docs/';
 
 /** Message code -> section of docs/errors.md (GitHub heading anchors). */
-const ANCHORS = {
+export const ANCHORS = {
   F1: 'f1--contract-mismatch',
   F2: 'f2--unknown-slot',
   F3: 'f3--missing-implementation',
@@ -87,6 +87,14 @@ function ignoredProps(message) {
   return m ? m[1].replace(/;\s*$/, '').trim() : null;
 }
 
+/** "narrows the parameters of ...: X" from a value slot's argsFit diagnostic, or null. */
+function narrowedArgs(message) {
+  const m = /'\[F1\] (narrows the parameters of (?:the contract|these members))'\s*:\s*(.+?);?\s*\}'?\.?$/.exec(message);
+  if (!m) return null;
+  const what = m[2].replace(/;\s*$/, '').trim();
+  return m[1].endsWith('the contract') ? `narrows the parameters of the contract ${what}` : `narrows the parameters of these members: ${what}`;
+}
+
 /**
  * Map a failed gate run to `[Fx] Slot (file): ...` lines.
  * @returns {string[]} one line per diagnostic
@@ -134,6 +142,16 @@ export function mapDiagnostics(p, output, map) {
       case 'isComponent':
         lines.push(`[F1] ${tag}: is not a React component (function, memo, forwardRef or class): ${msg}`);
         break;
+      case 'fits':
+        lines.push(`[F1] ${tag}: does not fit the contract ${p.sdk?.name ?? 'SDK'} SlotTypes['${info.slot}']: ${msg}`);
+        break;
+      case 'argsFit': {
+        const narrowed = narrowedArgs(d.message);
+        lines.push(narrowed
+          ? `[F1] ${tag}: ${narrowed} (the SDK may pass any value its contract allows: accept the contract's parameter types)`
+          : `[F1] ${tag}: ${msg}`);
+        break;
+      }
       default:
         lines.push(`[F1] ${tag}: ${msg}`);
     }

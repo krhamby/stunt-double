@@ -20,7 +20,26 @@ export interface SlotProps {
   Badge: BadgeProps;
 }
 
-export type SlotName = keyof SlotProps;
+/** The money formatter every PriceTag and the checkout total use. */
+export type FormatPrice = (amount: number, currency?: string) => string;
+
+/** The analytics service the SDK reports user actions to. */
+export interface Analytics {
+  /** Which backend this is (shown in debug tooling). */
+  readonly id: string;
+  /** Record one event, e.g. track('add_to_cart', { product: 'tee' }). */
+  track(event: string, data?: Record<string, unknown>): void;
+}
+
+/** Types every implementation of a VALUE slot must have (services, functions, config: anything but a component). */
+export interface SlotTypes {
+  /** Formats money for display (called by PriceTag and the checkout total). */
+  formatPrice: FormatPrice;
+  /** Receives SDK events such as add_to_cart (called by ProductCard). */
+  analytics: Analytics;
+}
+
+export type SlotName = keyof SlotProps | keyof SlotTypes;
 export type RequiredSlot = 'Logo';
 /** Written by `stunt-double sdk-lint --write` at build time: hash(manifest + contracts). */
 export type SlotAbi = 'unset';

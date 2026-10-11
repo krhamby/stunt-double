@@ -3,10 +3,10 @@
 stunt-double promises that every injection mistake is a **build failure**: the production build (or CI) exits non-zero with an actionable `[Fx]` message, or the dev server shows it. Never a runtime crash, never a silent fallback to the SDK default. This directory turns that promise into regression tests that run against real tools on real installs:
 
 - **one fixture app per toolchain** (`examples/customer-<tool>/`), installed from the tarballs `npm run setup` packs, exactly like a user's project;
-- **one shared mutation catalogue** (`tests/mutations/`): every mistake of the failure catalogue ([docs/DESIGN.md §2](../docs/DESIGN.md#2-failure-catalogue-the-north-star)) written once, run by every toolchain;
+- **one shared mutation catalogue** (`tests/mutations/`): every mistake of the failure catalogue ([docs/DESIGN.md §2](../docs/DESIGN.md#2-failure-catalogue-the-north-star)) written once. The reference suite (Vite) runs all of it; every other toolchain runs the part that depends on the tool (see [The mutation catalogue](#the-mutation-catalogue));
 - **one small suite file per toolchain** (`tests/<tool>.test.mjs`) that says how to build and render its fixture and, where the tool differs, what it expects instead.
 
-A new toolchain adds three new files and edits nothing (see [Adding a toolchain](#adding-a-toolchain)).
+A new toolchain adds two files and one line of CI (see [Adding a toolchain](#adding-a-toolchain)).
 
 ## Contents
 
@@ -46,7 +46,7 @@ Environment variables:
 | `STUNT_DOUBLE_REINSTALL=1` | ignore a cached install |
 | `STUNT_DOUBLE_CLEAN=1` | delete each suite's work dir when it finishes |
 
-The Vite suite (54 scenarios) takes about 70 seconds on 4 CPUs once its fixture is installed; the first run adds two `npm install`s (seconds with a warm npm cache). The core unit tests take about 1 second.
+The Vite suite (70 scenarios) takes about 70 seconds on 4 CPUs once its fixture is installed; the first run adds two `npm install`s (seconds with a warm npm cache). The core unit tests take about 1 second.
 
 ## How a suite runs
 
@@ -80,7 +80,7 @@ Every `examples/customer-<tool>/` app is the same "project that injects its own 
 | Requirement | customer-vite does it with |
 |---|---|
 | depends on `@acme/core` and `stunt-double` via `file:` specs into `../../.packs/`, and stands in for the registry's auto-installed placeholder peer with `"overrides": { "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz" }` | `package.json`, `.npmrc` |
-| overrides in `src/overrides/`: **Button** wraps `@acme/core/original/Button` in `<span data-sd="BRAND_BUTTON" data-ctx={theme}>` where the app theme is `"dark"`; **PriceTag** replaces the default (`data-sd="BRAND_PRICE"`); **Logo** implements the required slot (`data-sd="BRAND_LOGO"`). Typed with `SlotProps['X']` | `src/overrides/*.tsx`, `src/theme.tsx` |
+| overrides in `src/overrides/`: **Button** wraps `@acme/core/original/Button` in `<span data-sd="BRAND_BUTTON" data-ctx={theme}>` where the app theme is `"dark"`; **PriceTag** replaces the default (`data-sd="BRAND_PRICE"`); **Logo** implements the required slot (`data-sd="BRAND_LOGO"`). Typed with `SlotProps['X']`. Two **value slots**: **formatPrice** returns `` `${currency} ${amount.toFixed(2)}` `` ("USD 19.99"), **analytics** is a service object whose `id` is `"BRAND_ANALYTICS"` | `src/overrides/*.tsx`, `src/overrides/*.ts`, `src/theme.tsx` |
 | renders `<section data-probe="app">` with one app-level `<Button>` from `@acme/core`, and `<section data-probe="sdk">` with `<Checkout products={2 products}>` | `src/App.tsx`, `src/products.ts` |
 | a **build** command that is the tool's real production build, plus whatever produces something the probe can render | `vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr` |
 | a **render** command that prints `STUNT-DOUBLE-RENDER <JSON string of the HTML>` (see `tests/harness/markers.mjs`) | `node probes/render.mjs` |
@@ -90,8 +90,11 @@ The standard render that results (`STANDARD_RENDER` in `tests/harness/expect.mjs
 
 ```
 app: BRAND_BUTTON(dark) > SDK_DEFAULT_BUTTON(none)
-sdk: BRAND_LOGO x1, BRAND_PRICE x3, BRAND_BUTTON(dark) x3, SDK_DEFAULT_BUTTON(in-cart) x3, SDK_DEFAULT_PRICETAG x0
+sdk: BRAND_LOGO x1, BRAND_PRICE x3, BRAND_BUTTON(dark) x3, SDK_DEFAULT_BUTTON(in-cart) x3, SDK_DEFAULT_PRICETAG x0,
+     SDK_TOTAL(USD 19.99) x1
 ```
+
+`SDK_TOTAL` is the SDK's own checkout total, formatted by whatever implements the `formatPrice` value slot: `USD 19.99` is the project's function called from inside the SDK (the SDK default would print `$19.99`). The standard bundle check (`STANDARD_BUNDLE`) also requires `BRAND_ANALYTICS` and forbids `SDK_DEFAULT_ANALYTICS`: the replaced analytics service is not shipped.
 
 The context values prove more than "something rendered": `dark` is the app's own React context seen from deep inside the SDK, `in-cart` is the SDK's context seen by the original the override wraps. A pre-bundled or duplicated module would break one of them.
 
@@ -125,24 +128,32 @@ Everything else (the tool's config, extra scripts, a different SSR or render str
 | F8 | duplicate React (1.0.0-nested-react) | build fails, `[F8] "react" … 2 copies` |
 | F9b | client-slot override imports `server-only` | build fails, `[F9]` |
 | F9c | async override in a client slot | build fails, `[F9] Logo … must not be an async component` |
+| V1a, V1d | value slot does not fit `SlotTypes`: formatPrice returns a number; analytics lacks `id` | build fails, `[F1] … does not fit the contract … SlotTypes['…']` |
+| V1b | value slot narrows a function parameter (`amount: 19.99 \| 9.5`) | build fails, `[F1] … narrows the parameters of the contract` |
+| V1c | service narrows a **method** parameter (`track(event: 'page_view')`), which plain TypeScript accepts | build fails, `[F1] analytics … narrows the parameters of these members: "track"` |
+| V1e, V-default | function with fewer parameters; no value overrides at all | **must pass**: `SDK_TOTAL(EUR 19.99)`; the SDK default `SDK_TOTAL($19.99)` |
+| V2, V5 | typo `fromatPrice.ts`; default export of `analytics` | build fails, `[F2] … did you mean "formatPrice"`; `[F5]` |
+| V7 | value override imports itself from the barrel | build fails, `[F7] … a circular import` |
 | F6c-ssr *(vite family)* | SSR environment externalizes the SDK | build fails, `[F6] … environment "ssr" externalizes` |
 | F6c-vitest *(vite family)* | Vitest `deps.optimizer` pre-bundles the SDK | `vitest run` fails, `[F6] Vitest deps.optimizer` |
 | F6g-alias *(vite family)* | a user alias aims the Button socket at the default | `safe`: inert (adapter alias wins) or `[F6]` from the audit |
 
 Outcomes: `fail` (non-zero exit + every message), `pass` (exit 0, optional render/bundle checks), `safe` (either fails with the messages or passes **and renders the overrides**: for mistakes a tool may make impossible by construction).
 
-Besides the catalogue, `defineToolSuite` adds: the positive test, an optional dev-server test, an optional TypeScript 5.9 run of every `typegate` mutation, and an optional universal-tier block (positive, a subset of the catalogue through `stunt-double check &&`, "link declared but not installed", and the pinned residual "no `check &&` prefix").
+**Which suites run what.** Most mistakes are caught by `generate()` or the type gate: the same code whatever the tool. So only the reference suite (`reference: true`, Vite) runs the whole catalogue, the TypeScript 5.9 rerun and the universal tier's mutations. Every other suite runs what depends on the tool (`runsInEverySuite` in `tests/mutations/index.mjs`): the `res`, `cfg`, `aud` and `stale` scenarios, its family's scenarios, and one smoke test per stage (F1a, F2a, V1c, V-default). A suite can add more with `mutations: (list, catalogue) => ...` (the pnpm suite adds the installed-SDK scenarios, `sdk-bug`).
+
+Besides the catalogue, `defineToolSuite` adds: the positive test, an optional dev-server test, an optional TypeScript 5.9 run of every `typegate` mutation, and an optional universal-tier block (positive, the listed mutations through `stunt-double check &&`, "link declared but not installed", and the pinned residual "no `check &&` prefix").
 
 A scenario that applies to every tool goes in the catalogue (append to the matching file, unique id). A scenario that only makes sense for one tool family goes in a family file with `family: '<name>'` (like `vite-family.mjs`). Adding a catalogue entry is a change every suite inherits, so it needs every existing suite green.
 
 ## Adding a toolchain
 
-Your change is **three new files**. You edit nothing that already exists: not the harness, not the catalogue, not `package.json`, not another workflow.
+Your change is **two new files and one CI line**. You edit nothing else: not the harness, not the catalogue, not `package.json`.
 
 ```
 examples/customer-<tool>/        the fixture app (see the contract above)
 tests/<tool>.test.mjs            one defineToolSuite({...}) call
-.github/workflows/<tool>.yml     its CI job
+.github/workflows/ci.yml         one entry in the `suite` job's matrix
 ```
 
 `scripts/run-tests.mjs` discovers `tests/*.test.mjs` on its own, so `npm test` and `npm test -- <tool>` pick the suite up immediately.
@@ -182,9 +193,8 @@ defineToolSuite({
   },
   expectations: {
     // only where the tool really differs from the catalogue default; every entry is a documented decision
-    F5a: { messages: [/export 'Logo' \(imported as 'Logo'\) was not found/] },  // native message instead
+    F2a: { messages: [/…/] },                       // e.g. the tool's native message instead
   },
-  typescript5: true,                                // also run the type-gate mutations with TypeScript 5.9
 });
 ```
 
@@ -209,44 +219,23 @@ Optional blocks:
     files: { 'webpack.universal.config.mjs': '...' },  // the tool's config WITHOUT the adapter
     build: 'stunt-double check && webpack --config webpack.universal.config.mjs',
     bare: 'webpack --config webpack.universal.config.mjs',
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b'],  // caught by the `check &&` prefix
   },
   pm: 'pnpm',                                       // install the fixture with another package manager
 ```
 
-A dev probe receives the installed fixture (`fx`, reset to pristine), the node:test context and the suite. Use `fx.run()`, `fx.override()`, `fx.pristineText()` and `fx.dir` (a scratch dir next to the app), and `assert` what the developer would see. For Vite-based tools, reuse `viteDevProbe()`.
+A dev probe receives the installed fixture (`fx`, reset to pristine), the node:test context and the suite. Use `fx.run()`, `fx.override()`, `fx.pristineText()` and `fx.dir` (a scratch dir next to the app), and `assert` what the developer would see. For Vite-based tools, reuse `viteDevProbe()`; for a bundler with a `--watch` build, `watchProbe({ command })` (typo, fix, remove and re-add an override, checking every compiler and the render after each).
 
-### 3. The workflow
+### 3. The CI entry
+
+Add one entry to the `suite` job's matrix in `.github/workflows/ci.yml`. It downloads the `.packs/` the `setup` job built once and runs `npm test -- <tool>`:
 
 ```yaml
-# .github/workflows/webpack.yml
-name: webpack
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-concurrency:
-  group: webpack-${{ github.ref }}
-  cancel-in-progress: true
-jobs:
-  webpack:
-    name: webpack 5 suite
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup     # Node 22 + npm cache + npm ci + npm run setup
-      - run: npm test -- webpack
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: webpack-results
-          path: /tmp/stunt-double-tests/*/results.json
-          if-no-files-found: ignore
+          - suite: webpack
+            timeout: 45      # optional, minutes (default 30)
+            browser: true    # optional flags install what the suite needs: bun, pnpm, yarn (corepack), browser (Chromium)
 ```
 
-Install anything else the tool needs (Bun, pnpm via corepack, a browser) in this workflow, not in the shared action.
+A tool that needs something else installed gets a new flag and step in that job, not a step in the shared action.
 
 ### Checklist
 
@@ -270,15 +259,16 @@ Import everything from `tests/harness/index.mjs`.
 | `commands.checkThenBuild` | | default `` `${check} && ${build}` `` |
 | `commands.<any>` | | referenced by `expectations` (`command: '<any>'`) or `positive.alsoPass` |
 | `family`, `toolConfig` | | enable and target family-specific mutations |
-| `pm` | | `npm` (default), `pnpm`, `yarn`, `bun` (only npm is exercised so far) |
+| `pm` | | `npm` (default), `pnpm` (`tests/vite-pnpm.test.mjs`), `yarn` (Yarn 4 through Corepack; Plug'n'Play in `tests/vite-yarn-pnp.test.mjs`), `bun`. Each keeps its install state across resets (`installState` in `tests/harness/pm.mjs`: `node_modules`, or `.pnp.cjs`, `.yarn/` and `yarn.lock`); run tools through the package manager where there is no `node_modules/.bin` (`fx.pm.exec('stunt-double')`) |
 | `positive` | | `{ render, bundle: { files, contains, absent }, alsoPass: [command names] }` |
-| `outputs` | | dirs the build may create (default `['dist']`) |
+| `outputs` | | dirs (or single generated files) the build may write (default `['dist']`) |
 | `generatedDir` | | where stunt-double may write (default `.stunt-double`) |
 | `unwired` | | `{ files, command }`: the tool without the adapter |
 | `expectations` | | per-mutation overrides, see above |
-| `mutations` | | `(list) => list` to filter or extend the applicable catalogue |
+| `reference` | | run the whole catalogue (one suite: `vite`); otherwise the per-tool subset |
+| `mutations` | | `(list, catalogue) => list` to filter or extend the applicable mutations |
 | `devProbe` | | `(fx, t, suite) => Promise` |
-| `typescript5` | | `true` or `{ spec, select }`: rerun `typegate` mutations with the npm alias `typescript5` |
+| `typescript5` | | `true` or `{ spec, select }`: rerun `typegate` mutations with the npm alias `typescript5` (the reference suite) |
 | `universal` | | universal-tier block, see above |
 | `addDependencies`, `addDevDependencies` | | extra deps written into the copy before install |
 | `sdk`, `layout` | | another SDK naming or source layout (defaults in `tests/harness/fixture.mjs`) |

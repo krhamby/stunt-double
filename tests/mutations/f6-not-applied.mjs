@@ -52,7 +52,7 @@ export function LegacyBanner() {
     tags: ['stale', 'must-pass'],
     apply: async (fx) => {
       fx.remove(fx.override('PriceTag.tsx'));
-      const g = await fx.run('stunt-double gen');
+      const g = await fx.run(`${fx.pm.exec('stunt-double')} gen`); // through the package manager (no .bin under Yarn PnP)
       if (g.code !== 0) throw new Error(`stunt-double gen failed:\n${g.output}`);
       fx.restore(fx.override('PriceTag.tsx'));
     },
@@ -64,7 +64,7 @@ export function LegacyBanner() {
     catches: 'adapter regenerates at every start',
     tags: ['stale', 'must-pass'],
     apply: async (fx) => {
-      const g = await fx.run('stunt-double gen');
+      const g = await fx.run(`${fx.pm.exec('stunt-double')} gen`); // through the package manager (no .bin under Yarn PnP)
       if (g.code !== 0) throw new Error(`stunt-double gen failed:\n${g.output}`);
       fx.remove(fx.override('PriceTag.tsx'));
     },

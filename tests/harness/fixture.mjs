@@ -169,7 +169,7 @@ export class Fixture {
 
     const key = this.installKey();
     const state = readJson(path.join(this.dir, 'install.json'));
-    if (state?.key === key && state.sdk === this.sdk.version && fs.existsSync(path.join(this.app, 'node_modules')) && !process.env.STUNT_DOUBLE_REINSTALL) {
+    if (state?.key === key && state.sdk === this.sdk.version && fs.existsSync(path.join(this.app, this.pm.installState[0])) && !process.env.STUNT_DOUBLE_REINSTALL) {
       this.installedSdk = state.sdk;
       this.note(`reused the install in ${this.app}`);
       await this.reset();
@@ -197,7 +197,7 @@ export class Fixture {
 
   /** Back to the pristine source (fresh-clone state: nothing generated, no build output, cold tool caches). */
   async reset() {
-    emptyDirExcept(this.app, ['node_modules']);
+    emptyDirExcept(this.app, this.pm.installState);
     copyFiles(this.pristine, listTree(this.pristine), this.app);
     for (const d of CACHE_DIRS) fs.rmSync(path.join(this.app, 'node_modules', d), { recursive: true, force: true });
     return this;

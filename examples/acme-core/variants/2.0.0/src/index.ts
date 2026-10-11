@@ -5,5 +5,6 @@ export { Footer } from '@acme/core-slots/Footer';
 export { ProductCard, type ProductCardProps } from './ProductCard.js';
 export { Checkout, type CheckoutProps } from './Checkout.js';
 export { CartProvider, useCart, type Cart, type CartItem } from './cart-context.js';
-export { formatPrice } from './format.js';
-export type { SlotProps, SlotName, RequiredSlot, SlotAbi, ButtonProps, PriceProps, LogoProps, FooterProps } from './contracts.js';
+export { formatPrice } from '@acme/core-slots/formatPrice';
+export { analytics } from '@acme/core-slots/analytics';
+export type { SlotProps, SlotTypes, FormatPrice, Analytics, SlotName, RequiredSlot, SlotAbi, ButtonProps, PriceProps, LogoProps, FooterProps } from './contracts.js';

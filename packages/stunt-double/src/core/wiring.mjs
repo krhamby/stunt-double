@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { readJson, real, findPackageJson, isInside } from './util.mjs';
+import { readJson, real, findPackageJson, isInside, fileExists } from './util.mjs';
 
 const LINK_FORMS = /^(file:|link:|portal:|workspace:)/;
 
@@ -41,7 +41,10 @@ export function linkDeclaration(root, slotPackage) {
     const spec = pkg[field]?.[slotPackage];
     if (typeof spec !== 'string' || !LINK_FORMS.test(spec)) continue;
     if (spec.startsWith('workspace:')) return { field, spec, linkForm: true, dir: workspaceDirs(root, pkg).find(named) ?? null };
-    return { field, spec, linkForm: true, dir: path.resolve(root, spec.replace(LINK_FORMS, '')) };
+    const target = path.resolve(root, spec.replace(LINK_FORMS, ''));
+    // a file: TARBALL is an ordinary install (e.g. the placeholder from a local registry mirror), not a link
+    if (/\.(tgz|tar|tar\.gz)$/i.test(target) || fileExists(target)) continue;
+    return { field, spec, linkForm: true, dir: target };
   }
   const ws = workspaceDirs(root, pkg).find(named);
   if (ws) return { field: 'workspaces', spec: path.relative(root, ws).split(path.sep).join('/'), linkForm: true, dir: ws };

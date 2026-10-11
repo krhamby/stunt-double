@@ -1,5 +1,5 @@
 'use client';
-import { formatPrice } from '../format.js';
+import { formatPrice } from '@acme/core-slots/formatPrice'; // a value slot: the project's formatter if it has one
 
 /** Props every PriceTag implementation receives from @acme/core. */
 export interface PriceTagProps {

@@ -1,7 +1,7 @@
 {
   "name": "stunt-double",
   "version": "0.1.0",
-  "description": "Build-time, fail-closed component slots for React + TypeScript: project components replace SDK components, and every injection mistake fails the build.",
+  "description": "Build-time, fail-closed dependency injection for React + TypeScript: project components, services and values replace SDK defaults, and every injection mistake fails the build.",
   "license": "MIT",
   "author": "Kevin Hamby",
   "repository": {

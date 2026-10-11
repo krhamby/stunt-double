@@ -1,6 +1,7 @@
 // Transitive walk of an implementation's project-local import closure (oxc-parser + oxc-resolver,
 // tsconfig "paths" aware). Finds:
 //   F7  the implementation reaches its own slot (socket import, barrel import, namespace member): infinite render
+//       (component slots), or a circular import that reads the slot before it is initialized (value slots)
 //   W7  it renders an SDK component that itself renders this slot (consumer cycle): warning
 //   F9  a client slot's closure imports "server-only"
 // The walk stops at node_modules (except cfg.scanPackages) and at non-literal dynamic imports (spec R4).
@@ -50,7 +51,9 @@ export function walkImplementation(o) {
   const warnings = [];
   const seen = new Set();
   const rel = (f) => posix(path.relative(root, f));
-  const wrapHint = `Wrap the default via '${sdk}/original/${slot}'.`;
+  const value = kind === 'value';
+  const wrapHint = `${value ? 'Use' : 'Wrap'} the default via '${sdk}/original/${slot}'.`;
+  const loop = value ? 'a circular import: the implementation would read itself before it is initialized' : 'infinite render';
   const isSdkBarrel = (spec) => spec === sdk || (spec.startsWith(sdk + '/') && !/^\/(original|contracts|layer)(\/|$)/.test(spec.slice(sdk.length)) && !spec.endsWith('.json'));
   // `requested`: the names the importer takes from this file (null = everything: namespace, dynamic, entry)
   const requestedOf = new Map();
@@ -68,7 +71,7 @@ export function walkImplementation(o) {
     for (const e of info.edges) {
       if (e.typeOnly) continue;
       if (e.spec === `${slotPkg}/${slot}`) {
-        errors.push(`[F7] ${via} imports "${e.spec}": that is slot "${slot}" itself (infinite render). ${wrapHint}`);
+        errors.push(`[F7] ${via} imports "${e.spec}": that is slot "${slot}" itself (${loop}). ${wrapHint}`);
         continue;
       }
       if (e.spec === 'server-only' && kind === 'client') {
@@ -79,16 +82,18 @@ export function walkImplementation(o) {
         if (e.names) {
           const names = e.names.filter((x) => !x.isType);
           if (names.some((x) => x.name === exportName))
-            errors.push(`[F7] ${via} imports { ${exportName} } from "${e.spec}": that is slot "${slot}" itself (infinite render). ${wrapHint}`);
+            errors.push(`[F7] ${via} imports { ${exportName} } from "${e.spec}": that is slot "${slot}" itself (${loop}). ${wrapHint}`);
           else if (names.some((x) => x.name === 'NamespaceObject' && x.local && new RegExp(`\\b${esc(x.local)}\\s*\\??\\.\\s*${esc(exportName)}\\b`).test(info.src)))
-            errors.push(`[F7] ${via} uses <ns>.${exportName} from "${e.spec}": that is slot "${slot}" itself (infinite render). ${wrapHint}`);
+            errors.push(`[F7] ${via} uses <ns>.${exportName} from "${e.spec}": that is slot "${slot}" itself (${loop}). ${wrapHint}`);
           else if (e.kind === 'export' && names.some((x) => x.name === 'AllButDefault') && !info.exports.has(exportName)
             && (requested === null || requested.has(exportName)) && chain.length > 0)
-            errors.push(`[F7] ${via} re-exports everything from "${e.spec}" and ${rel(chain.at(-1))} takes ${exportName} from it: that is slot "${slot}" itself (infinite render). ${wrapHint}`);
+            errors.push(`[F7] ${via} re-exports everything from "${e.spec}" and ${rel(chain.at(-1))} takes ${exportName} from it: that is slot "${slot}" itself (${loop}). ${wrapHint}`);
           else for (const x of names) if (consumers.includes(x.name))
-            warnings.push(`[W7] ${via} renders ${x.name} from "${e.spec}", and ${x.name} renders slot "${slot}": check for infinite recursion.`);
+            warnings.push(value
+              ? `[W7] ${via} imports ${x.name} from "${e.spec}", and ${x.name} uses slot "${slot}": a circular import. Do not use ${x.name} while modules initialize (top-level code), only inside functions.`
+              : `[W7] ${via} renders ${x.name} from "${e.spec}", and ${x.name} renders slot "${slot}": check for infinite recursion.`);
         } else if (new RegExp(`\\.\\s*${esc(exportName)}\\b|\\{[^}]*\\b${esc(exportName)}\\b[^}]*\\}\\s*=`).test(info.src)) {
-          errors.push(`[F7] ${via} loads "${e.spec}" dynamically and reads ${exportName}: that is slot "${slot}" itself (infinite render). ${wrapHint}`);
+          errors.push(`[F7] ${via} loads "${e.spec}" dynamically and reads ${exportName}: that is slot "${slot}" itself (${loop}). ${wrapHint}`);
         }
         continue;
       }

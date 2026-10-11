@@ -16,7 +16,7 @@ import { cmdInit, INIT_FLAGS, TOOL_CONFIGS } from './init.mjs';
 
 const DOCS = 'https://github.com/krhamby/stunt-double#readme';
 
-const HELP = `stunt-double ${TOOL_VERSION}: build-time, fail-closed component slots for React + TypeScript
+const HELP = `stunt-double ${TOOL_VERSION}: build-time, fail-closed injection for React + TypeScript (component and value slots)
 
 Setup (no init needed): npm i -D stunt-double, add stuntDouble() to your tool config, put overrides in
 src/overrides/. Generated files go to .stunt-double/ (self-ignoring; never edit).
@@ -146,8 +146,10 @@ function contractDocs(p) {
   const docs = {};
   if (!f) return docs;
   const src = fs.readFileSync(f, 'utf8');
-  const body = /interface\s+SlotProps\s*\{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
-  for (const m of body.matchAll(/\/\*\*([\s\S]*?)\*\/\s*([A-Za-z0-9_]+)\s*:/g)) docs[m[2]] = m[1].replace(/\s*\*\s*/g, ' ').trim();
+  for (const iface of ['SlotProps', 'SlotTypes']) {
+    const body = new RegExp(`interface\\s+${iface}\\s*\\{([\\s\\S]*?)\\n\\}`).exec(src)?.[1] ?? '';
+    for (const m of body.matchAll(/\/\*\*([\s\S]*?)\*\/\s*([A-Za-z0-9_]+)\s*:/g)) docs[m[2]] = m[1].replace(/\s*\*\s*/g, ' ').trim();
+  }
   return docs;
 }
 
@@ -179,8 +181,9 @@ async function cmdWhy(a) {
   out(`  EFFECTIVE   ${describeChain(e, p.rel)}`);
   e.chain.forEach((c, i) => out(`  chain[${i}]   ${c.source === 'app' ? `${p.rel(c.file)}#${c.export}${c.via === 'map' ? ' (config map)' : ''}` : `${c.spec}${c.layer ? ` (layer ${c.layer})` : ' (SDK default)'}`}`));
   if (!e.chain.length) out(`  chain:      (empty) -> [F3]`);
-  out(`  rendered by: ${(meta.consumers ?? []).join(', ') || '(app code only)'}`);
-  out(`  types:      '${p.sdk.name}' types ${slot} by its contract SlotProps['${slot}'] (go-to-definition opens the SDK declaration); builds render EFFECTIVE`);
+  const value = p.sdk.isValue(slot);
+  out(`  ${value ? 'used by:    ' : 'rendered by:'} ${(meta.consumers ?? []).join(', ') || '(app code only)'}`);
+  out(`  types:      '${p.sdk.name}' types ${slot} by its contract ${value ? 'SlotTypes' : 'SlotProps'}['${slot}'] (go-to-definition opens the SDK declaration); builds ${value ? 'use' : 'render'} EFFECTIVE`);
   const probs = p.problems.filter((x) => x.includes(`"${slot}"`) || x.includes(`/${slot}.`) || x.includes(`/${slot}/`));
   if (probs.length) { err(formatProblems(p, probs)); return 1; }
   return 0;
@@ -196,9 +199,28 @@ async function cmdEject(a) {
   const hasDefault = !!p.sdk.slots[slot].default;
   if (a.flags.has('wrap') && !hasDefault) { err(`stunt-double eject: slot "${slot}" is required: ${p.sdk.name} ships no default to wrap. Run eject ${slot} for a starter to implement.`); return 1; }
   const wrap = hasDefault && !a.flags.has('replace');
-  const file = path.join(p.overridesDir, `${slot}.tsx`);
+  const value = p.sdk.isValue(slot);
+  const file = path.join(p.overridesDir, `${slot}${value ? '.ts' : '.tsx'}`);
   if (fs.existsSync(file) && !a.flags.has('force')) { err(`stunt-double eject: ${p.rel(file)} already exists (use --force to overwrite).`); return 1; }
-  const text = wrap
+  const what = hasDefault ? ' (replaces the SDK default)' : ` (REQUIRED: ${p.sdk.name} ships no default)`;
+  const text = value
+    ? (wrap
+      ? `import { ${exp} as original } from '${p.sdk.originalSpecifier}${slot}';
+import type { SlotTypes } from '${p.sdk.name}/contracts';
+
+/**
+ * Project implementation of the "${slot}" value slot: starts as the ${p.sdk.name} default. Typed by its contract,
+ * so the build fails if it stops fitting. Decorate or replace it. See \`npx stunt-double why ${slot}\`.
+ */
+export const ${exp}: SlotTypes['${slot}'] = original;
+`
+      : `import type { SlotTypes } from '${p.sdk.name}/contracts';
+
+/** Project implementation of the "${slot}" value slot${what}. */
+// Fails the build ([TS] TS2304 from the type gate) until you implement it: never a silent missing value.
+export const ${exp}: SlotTypes['${slot}'] = TODO_implement_${slot};
+`)
+    : wrap
     ? `import { ${exp} as Original } from '${p.sdk.originalSpecifier}${slot}';
 import type { SlotProps } from '${p.sdk.name}/contracts';
 
@@ -210,7 +232,7 @@ export function ${exp}(props: SlotProps['${slot}']) {
     : `import type { ReactNode } from 'react';
 import type { SlotProps } from '${p.sdk.name}/contracts';
 
-/** Project implementation of the "${slot}" slot${hasDefault ? ' (replaces the SDK default)' : ` (REQUIRED: ${p.sdk.name} ships no default)`}. */
+/** Project implementation of the "${slot}" slot${what}. */
 export function ${exp}(props: SlotProps['${slot}']): ReactNode {
   // Fails the build ([TS] TS2304 from the type gate) until you implement it: never a silent empty render.
   return TODO_implement_${slot}(props);
@@ -218,7 +240,7 @@ export function ${exp}(props: SlotProps['${slot}']): ReactNode {
 `;
   fs.mkdirSync(p.overridesDir, { recursive: true });
   fs.writeFileSync(file, text);
-  out(`stunt-double: wrote ${p.rel(file)} (${wrap ? 'wraps the SDK default' : 'a starter that fails the build until implemented'})`);
+  out(`stunt-double: wrote ${p.rel(file)} (${wrap ? (value ? 'starts as the SDK default' : 'wraps the SDK default') : 'a starter that fails the build until implemented'})`);
   const g = project(a, 'return');
   if (g.problems.length) err(formatProblems(g));
   return 0;
@@ -294,7 +316,7 @@ async function cmdDoctor(a) {
   // scripts of adapter-less tools must chain the check
   for (const [name, script] of Object.entries(pkg.scripts ?? {}))
     if (ADAPTERLESS.test(script) && !/stunt-double\s+check\s*&&/.test(script))
-      errors.push(`[DOCTOR] script "${name}" runs a tool without a stunt-double adapter and without the gate: "stunt-double check && ${script}"${p.tier === 'universal' ? '' : ' (that tool also needs the universal tier: npx stunt-double init --universal)'}`);
+      errors.push(`[DOCTOR] script "${name}" runs a tool without a stunt-double adapter and without the gate: "stunt-double check && ${script}"${p.tier === 'universal' ? '' : ' (that tool also needs the universal tier: npx stunt-double init --universal)'}${/(^|\s)(npx\s+)?esbuild\b/.test(script) ? `. Better: esbuild's CLI cannot load plugins, so build through its JS API with stuntDoubleEsbuild() from stunt-double/esbuild` : /(^|\s)bun\s+build\b/.test(script) ? `. Better: build through Bun.build() in a script, with stuntDoubleBun() from stunt-double/bun` : ''}`);
   // universal tier: package-manager link form
   if (p.sdk && p.link) {
     const want = LINK_FORM[p.pm];

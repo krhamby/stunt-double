@@ -4,7 +4,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { generate, StuntDoubleError } from '../src/core/index.mjs';
+import { generate, StuntDoubleError, adapterOptions } from '../src/core/index.mjs';
 import { project, write, read, SRC, SLOTS, fakeSdk } from './helpers.mjs';
 
 const base = { 'src/overrides/Button.tsx': SRC.wrapButton, 'src/overrides/Logo.tsx': SRC.logo };
@@ -54,6 +54,23 @@ describe('generate: the positive case', () => {
     const rsc = gen(root, { rsc: true });
     assert.match(fs.readFileSync(rsc.shimFile('Button'), 'utf8'), /^'use client';/);
     assert.doesNotMatch(fs.readFileSync(rsc.shimFile('Card'), 'utf8'), /use client/, 'Card is a shared slot');
+  });
+});
+
+describe('generate: the slot package as a dependency', () => {
+  test('a file: TARBALL of the slot package (e.g. the placeholder from a local mirror) is an install, not a universal-tier link', () => {
+    const { root } = project({ files: { ...base, 'vendor/acme-core-slots-0.0.1.tgz': 'not really a tarball' }, pkg: { dependencies: { '@acme/core': '1.0.0', '@acme/core-slots': 'file:./vendor/acme-core-slots-0.0.1.tgz' } } });
+    const p = gen(root);
+    assert.deepEqual(p.problems, []);
+    assert.equal(p.tier, 'adapter');
+    assert.equal(path.relative(root, p.outDir), '.stunt-double');
+  });
+
+  test('a file: DIRECTORY of the slot package is the universal-tier link: generated files go there', () => {
+    const { root } = project({ files: { ...base, 'sdk-slots/package.json': { name: '@acme/core-slots', version: '0.0.0', private: true } }, pkg: { dependencies: { '@acme/core': '1.0.0', '@acme/core-slots': 'file:./sdk-slots' } } });
+    const p = gen(root);
+    assert.equal(p.tier, 'universal');
+    assert.equal(path.relative(root, p.outDir), 'sdk-slots');
   });
 });
 
@@ -170,6 +187,13 @@ describe('generate: F6 / F8 and config', () => {
   test('CFG: an unknown config key is an error, like a typo in a file name', () => {
     const { root } = project({ files: base, config: { overidesDir: 'src/overrides' } });
     assert.match(problems(gen(root)), /\[CFG\] unknown key "overidesDir"/);
+  });
+
+  test("CFG: an adapter's unknown option is reported by generate(), its own flags are split off", () => {
+    const { root } = project({ files: base });
+    const { flags, genOpts } = adapterOptions('stuntDouble()', { typecheck: false, overridesDir: 'src/overrides', typecheck2: true }, { typecheck: true, audit: true });
+    assert.deepEqual(flags, { typecheck: false, audit: true });
+    assert.match(problems(gen(root, genOpts)), /\[CFG\] unknown stuntDouble\(\) option "typecheck2"\. Known options: typecheck, audit, root/);
   });
 
   test('SETUP: no dependency ships a slot manifest', () => {

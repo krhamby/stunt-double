@@ -38,10 +38,30 @@ export const SLOTS = {
   Logo: { export: 'Logo', kind: 'client', required: true, consumers: ['Dialog'] },
 };
 
+/** Default contract of a value slot in the fake SDK (override per slot with fakeSdk({ valueTypes })). */
+export const VALUE_TYPE = '(amount: number, currency?: string) => string';
+
+/** contracts.d.ts: SlotProps for component slots, SlotTypes for value slots (kind "value"). */
+function contractsDts(slots, abi, o) {
+  const comps = Object.keys(slots).filter((s) => slots[s].kind !== 'value');
+  const values = Object.keys(slots).filter((s) => slots[s].kind === 'value');
+  return [
+    `import type { ReactNode } from 'react';`,
+    ...(o.contractsPrelude ? [o.contractsPrelude] : []),
+    `export interface SlotProps {`,
+    ...comps.map((s) => `  ${s}: { children?: ReactNode; variant?: 'primary' | 'secondary'; onClick?: () => void };`),
+    `}`,
+    ...(values.length ? [`export interface SlotTypes {`, ...values.map((s) => `  ${s}: ${o.valueTypes?.[s] ?? VALUE_TYPE};`), `}`] : []),
+    `export type SlotName = keyof SlotProps${values.length ? ' | keyof SlotTypes' : ''};`,
+    `export type SlotAbi = '${abi ?? 'unset'}';`,
+  ].join('\n') + '\n';
+}
+
 /**
  * A slot-ready SDK package directory (what `npm install @acme/core` leaves in node_modules).
  * @param {string} dir     the package directory
- * @param {object} [o]     { name, version, slots, removedSlots, files (extra/overriding files), manifest (extra keys) }
+ * @param {object} [o]     { name, version, slots, removedSlots, files (extra/overriding files), manifest (extra keys),
+ *                          valueTypes / valueDefaults / contractsPrelude (value slots: contract type, default source) }
  */
 export function fakeSdk(dir, o = {}) {
   const name = o.name ?? '@acme/core';
@@ -77,12 +97,18 @@ export function fakeSdk(dir, o = {}) {
     ].join('\n') + '\n',
     'dist/Dialog.js': `'use client';\nimport { jsx } from 'react/jsx-runtime';\n${Object.keys(slots).map((s) => `import { ${slots[s].export ?? s} } from '${slotPackage}/${s}';`).join('\n')}\nexport function Dialog() { return jsx('div', {}); }\n`,
     'dist/Dialog.d.ts': `export declare function Dialog(): import('react').ReactNode;\n`,
-    'dist/contracts.d.ts': `import type { ReactNode } from 'react';\nexport interface SlotProps {\n${Object.keys(slots).map((s) => `  ${s}: { children?: ReactNode; variant?: 'primary' | 'secondary'; onClick?: () => void };`).join('\n')}\n}\nexport type SlotName = keyof SlotProps;\nexport type SlotAbi = '${abi ?? 'unset'}';\n`,
+    'dist/contracts.d.ts': contractsDts(slots, abi, o),
   };
   for (const [s, meta] of Object.entries(slots)) {
     if (!meta.default) continue;
-    files[meta.default] = `${meta.kind === 'client' ? "'use client';\n" : ''}export function ${meta.export ?? s}(props) { return props.children ?? null; }\n`;
-    files[meta.default.replace(/\.js$/, '.d.ts')] = `export declare function ${meta.export ?? s}(props: { children?: import('react').ReactNode; variant?: 'primary' | 'secondary'; onClick?: () => void }): import('react').ReactNode;\n`;
+    const exp = meta.export ?? s;
+    if (meta.kind === 'value') {
+      files[meta.default] = `export const ${exp} = ${o.valueDefaults?.[s] ?? '(amount, currency = "USD") => `${currency} ${amount}`'};\n`;
+      files[meta.default.replace(/\.js$/, '.d.ts')] = `export declare const ${exp}: import('../contracts.js').SlotTypes['${s}'];\n`;
+      continue;
+    }
+    files[meta.default] = `${meta.kind === 'client' ? "'use client';\n" : ''}export function ${exp}(props) { return props.children ?? null; }\n`;
+    files[meta.default.replace(/\.js$/, '.d.ts')] = `export declare function ${exp}(props: { children?: import('react').ReactNode; variant?: 'primary' | 'secondary'; onClick?: () => void }): import('react').ReactNode;\n`;
   }
   write(dir, { ...files, ...o.files });
   return { name, slotPackage, version, dir };

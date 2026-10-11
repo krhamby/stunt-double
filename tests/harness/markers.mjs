@@ -4,6 +4,7 @@
 // context, data-ctx="<value>"):
 //   SDK defaults (from @acme/core):   SDK_DEFAULT_BUTTON(ctx = in-cart | none), SDK_DEFAULT_PRICETAG,
 //                                     SDK_DEFAULT_BADGE (1.1.0), SDK_DEFAULT_PRICE (2.0.0)
+//   SDK components using VALUE slots: SDK_TOTAL(ctx = the checkout total, formatted by the effective formatPrice)
 //   project overrides (examples):     BRAND_BUTTON(ctx = app theme), BRAND_PRICE, BRAND_LOGO, BRAND_FOOTER, ...
 // The app renders two sections: <section data-probe="app"> (app-level imports from '@acme/core') and
 // <section data-probe="sdk"> (the SDK's <Checkout>, i.e. SDK-internal slot positions).
