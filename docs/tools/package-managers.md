@@ -112,8 +112,8 @@ its broken variants.
 The reference app (`examples/customer-vite`: a `Button` override that wraps the default, a `PriceTag` that
 replaces it, the required `Logo`) was installed fresh under each package manager in two setups:
 
-- **adapter**: `stuntDouble()` in `vite.config.ts`, no link; script `vite build && vite build --ssr …`;
-- **universal**: no plugin, `ssr.noExternal: ['@acme/core']`, the `sdk-slots/` link, script
+- adapter: `stuntDouble()` in `vite.config.ts`, no link; script `vite build && vite build --ssr …`;
+- universal: no plugin, `ssr.noExternal: ['@acme/core']`, the `sdk-slots/` link, script
   `stunt-double check && vite build && …`, and the same build without the prefix ("bare").
 
 In all 8 combinations the client and SSR builds pass, and the server-rendered output carries the overrides both
@@ -167,11 +167,11 @@ that still has shims from before.
 
 ## Known gaps
 
-- **Bare universal builds** are not gated (bold cells). Put `stunt-double check &&` in front of every adapter-less
+- Bare universal builds are not gated (bold cells). Put `stunt-double check &&` in front of every adapter-less
   build and make `stunt-double check` a required CI step, or use an adapter.
-- **npm multi-app workspaces with links** render another app's overrides in bare builds. Use the default adapter
+- npm multi-app workspaces with links render another app's overrides in bare builds. Use the default adapter
   setup there.
-- **Yarn PnP with TypeScript 7** needs the patched TypeScript 5.9 alias for the type gate.
-- **Yarn without a placeholder**: a tool you forgot to wire fails with a plain resolve error rather than the
+- Yarn PnP with TypeScript 7 needs the patched TypeScript 5.9 alias for the type gate.
+- Yarn without a placeholder: a tool you forgot to wire fails with a plain resolve error rather than the
   `STUNT-DOUBLE-NOT-WIRED` text. Add the placeholder (`yarn add @acme/core-slots`) if you want the message.
-- **`file:` under pnpm and Bun** is always wrong for `sdk-slots`; use the lines in the table.
+- `file:` under pnpm and Bun is always wrong for `sdk-slots`; use the lines in the table.
