@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0-bad-relative",
+  "extends": null,
+  "description": "BROKEN SDK (F6a): Checkout imports ./original/Button.js directly, so the Button override can never reach that position. Published with sdk-lint SKIPPED, to prove projects catch it on the installed dist.",
+  "lint": false
+}

@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "extends": null,
+  "description": "Baseline: slots Button (optional), PriceTag (optional), Logo (REQUIRED, no default). Built straight from ../../src.",
+  "lint": true
+}

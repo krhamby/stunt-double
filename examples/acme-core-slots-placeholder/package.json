@@ -1,0 +1,23 @@
+{
+  "name": "@acme/core-slots",
+  "version": "0.0.1",
+  "description": "Registry placeholder for the @acme/core slot package. Projects LINK their own generated package under this name (npx stunt-double init). If you see this package resolved, the tool or graph is not wired: it fails at resolve time on purpose.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "stuntDouble": {
+    "placeholder": true
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./not-wired.d.ts",
+      "default": "./not-wired.js"
+    }
+  },
+  "files": [
+    "not-wired.js",
+    "not-wired.d.ts",
+    "README.md"
+  ]
+}
