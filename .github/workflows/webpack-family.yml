@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [webpack, rspack]
+        tool: [webpack, rspack, rsbuild]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

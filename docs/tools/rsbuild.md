@@ -69,7 +69,7 @@ Every mistake prints its `[Fx]` line once per environment, so with `web` + `node
 | F4 | Two files claim one slot | exit 1, STA `[F4]` | overlay (STA) |
 | F5 | Wrong export | exit 1, STA `[F5]` + RES `ESModulesLinkingError` | overlay (STA) |
 | F6a | SDK imports a slot default directly (`1.0.0-bad-relative`) | exit 1, STA dist scan `[F6]` | overlay (STA) |
-| F6b | Tool never wired (no `withStuntDouble`) | **Not caught.** See gap 1 | **Not caught.** See gap 1 |
+| F6b | Tool never wired (no `withStuntDouble`) | **exit 0, renders the last generated shims** (gap 1). Only `stunt-double check` fails: `[F6] … the registry placeholder` | same as build |
 | F6b′ | Registry placeholder installed instead of the link, adapter present | exit 1, STA wiring `[F6] … the registry placeholder` | overlay (STA) |
 | F6e | Warm persistent cache, override added or removed | correct: the decision changes on the next build (fingerprint in `cache.version`) | n/a |
 | F6g | App imports `@acme/core/original/X` outside overrides | exit 1, STA `[F6]` | overlay (STA) |
@@ -77,6 +77,8 @@ Every mistake prints its `[Fx]` line once per environment, so with `web` + `node
 | F7 | Override imports its own slot (directly or transitively) | exit 1, STA `[F7]` | overlay (STA) |
 | F8 | Duplicate React (`1.0.0-nested-react`) | exit 1, STA `[F8] "react" resolves to 2 copies`, **with or without** `resolve.dedupe` | overlay (STA) |
 | F9c | Async override in a client slot | exit 1, TYP `[F9]` | overlay (TYP) |
+
+Tests: `node --test tests/rsbuild.test.mjs` runs the shared webpack-family cases plus the Rsbuild-specific ones.
 
 Measured on a 4-CPU container: a production build of both environments takes about 0.9 to 1.4 s of wall time.
 
@@ -92,7 +94,7 @@ The dev results above were observed in real Chromium against the Rsbuild error o
    - `sdk-slots/gen/` does not exist. Rspack then prints the placeholder's `Module not found: Can't resolve './STUNT-DOUBLE-NOT-WIRED -- …'`.
    - A stale shim points at an override that was deleted. Rspack then prints `Module not found: Can't resolve '../../src/overrides/X.tsx'`.
 
-   With `resolve.aliasStrategy: 'prefer-alias'` the poison does fire. That setting disables tsconfig `paths` in the bundler for every alias, though, and it would have to be set in the unwired config itself. Mitigation: wire every Rsbuild config, or chain `stunt-double check &&` in front of any script that runs one.
+   With `resolve.aliasStrategy: 'prefer-alias'` the poison does fire. That setting disables tsconfig `paths` in the bundler for every alias, though, and it would have to be set in the unwired config itself. Mitigation: wire every Rsbuild config, or chain `stunt-double check &&` in front of any script that runs one. The check runs the wiring self-test, exits 1 and prints `[F6] @acme/core resolves @acme/core-slots to node_modules/@acme/core-slots (the registry placeholder …)`.
 
 2. **F8 with `resolve.dedupe` still fails the build.**
 
