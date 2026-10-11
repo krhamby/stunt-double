@@ -1,15 +1,14 @@
 {
-  "name": "customer-storybook",
+  "name": "customer-storybook-vite",
   "private": true,
   "version": "0.0.0",
-  "description": "A project that injects its own components into @acme/core with stunt-double, documented in Storybook 10 (builder-vite and builder-webpack5).",
+  "description": "A project that injects its own components into @acme/core with stunt-double, documented in Storybook 10 on builder-vite (Vite 8).",
   "type": "module",
   "scripts": {
     "postinstall": "stunt-double gen --no-fail",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build -o storybook-static",
     "build-storybook:vite-final": "storybook build -c .storybook-vite-final -o storybook-static-vite-final",
-    "build-storybook:webpack": "storybook build -c .storybook-webpack -o storybook-static-webpack",
     "typecheck": "tsc -b",
     "check": "stunt-double check",
     "probe": "node probes/render.mjs"
@@ -21,12 +20,7 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@babel/preset-env": "7.29.7",
-    "@babel/preset-react": "7.29.7",
-    "@babel/preset-typescript": "7.29.7",
-    "@storybook/addon-webpack5-compiler-babel": "4.0.1",
     "@storybook/react-vite": "10.6.1",
-    "@storybook/react-webpack5": "10.6.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
@@ -34,7 +28,6 @@
     "storybook": "10.6.1",
     "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
     "typescript": "7.0.2",
-    "vite": "8.3.4",
-    "webpack": "5.111.1"
+    "vite": "8.3.4"
   }
 }

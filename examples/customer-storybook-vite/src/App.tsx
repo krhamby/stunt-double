@@ -8,7 +8,7 @@ export function App() {
   return (
     <ThemeProvider value="dark">
       <main>
-        <h1>customer-storybook</h1>
+        <h1>customer-storybook-vite</h1>
         <section data-probe="app">
           <Button variant="primary">Sign in</Button>
         </section>
