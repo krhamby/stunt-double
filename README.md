@@ -15,20 +15,20 @@ Runtime DI (Swinject, a React context registry) finds a missing registration, a 
 | `container.register(Analytics.self) {…}` (any type, not only views) | the file `src/overrides/analytics.ts` (a [value slot](#value-slots-inject-anything-not-only-components)) |
 | the protocol a registration must conform to | the SDK's contract: `SlotProps['Button']` for a component, `SlotTypes['analytics']` for a value |
 | `resolve()` | a static `import` |
-| a wrong registration, a missing registration, or a type mismatch crashes at runtime | a non-zero exit from `vite build` / `next build` / `webpack` / `tsc`, or an overlay in the dev server, with an `[Fx]` message that names the file and the fix |
+| a wrong registration, a missing registration, or a type mismatch crashes at runtime | a non-zero exit from `vite build` / `next build` / `webpack` / `esbuild` / `jest` / `stunt-double check`, or an overlay in the dev server, with an `[Fx]` message that names the file and the fix |
 
 ## How it works
 
 - **The SDK side.** The SDK (here `@acme/core`) renders every overridable component through a bare *socket* import, `@acme/core-slots/Button`, and never satisfies that import itself.
 - **The project side.** The project answers each socket with a generated one-line shim. The shim re-exports either your override (`src/overrides/Button.tsx`) or the SDK default (`@acme/core/original/Button`).
-- **Wiring.** One static alias, added by a thin adapter in your tool's config, points the socket at the shims. The adapter also validates your overrides and runs a generated contract type check (`src/stunt-double.check.ts`) inside the build. Tools without an adapter reach the shims through a linked package and run `stunt-double check &&` first.
+- **Wiring.** One static alias, added by a thin adapter in your tool's config, points the socket at the shims. The adapter also validates your overrides and runs a generated contract type check inside the build. Everything generated lives in one self-ignoring directory, `.stunt-double/`. Tools without an adapter reach the shims through a linked package and run `stunt-double check &&` first.
 - **Fail-closed.** A tool nobody wired resolves the socket to a registry placeholder whose only content is an import that cannot resolve (`STUNT-DOUBLE-NOT-WIRED -- … run npx stunt-double doctor`). The build fails, instead of quietly rendering the SDK default.
 
 The override applies everywhere: in your app's own `<Button>` and inside SDK components that render a `Button`, such as the SDK's `Dialog`. If you replace a component outright, the SDK default is not in the bundle at all.
 
-## Quickstart (Vite)
+## Quickstart
 
-This assumes your SDK has adopted slots: socket imports, a `slot-manifest.json`, `@acme/core/contracts`, and a published `@acme/core-slots` placeholder. See [DESIGN.md §3](docs/DESIGN.md#3-sdk-side-what-acmecore-publishes). In this repository, `examples/acme-core` is such an SDK.
+This assumes your SDK has adopted slots: socket imports, a `slot-manifest.json`, `@acme/core/contracts`, and a published `@acme/core-slots` placeholder. See [docs/sdk-authors.md](docs/sdk-authors.md). In this repository, `examples/acme-core` is such an SDK.
 
 1. **Install.**
 
@@ -36,22 +36,19 @@ This assumes your SDK has adopted slots: socket imports, a `slot-manifest.json`,
    npm i -D stunt-double
    ```
 
-2. **Initialise.** `init` writes the `@acme/core-slots` link dependency, the committed `sdk-slots/package.json` stub, the `.gitignore` entries, tsconfig `paths` and `files`, the `postinstall` hook, and the adapter line where it can.
-
-   ```bash
-   npx stunt-double init
-   ```
-
-3. **Check the plugin line** in `vite.config.ts`. `init` adds it, or prints it if it cannot edit your config. Vitest picks it up from the same config.
+2. **Add the adapter** to your tool's config: one line. Nothing else is edited: no tsconfig, no `.gitignore`, no extra dependency.
 
    ```ts
+   // vite.config.ts (Vitest picks it up from the same file)
    import react from '@vitejs/plugin-react';
    import { stuntDouble } from 'stunt-double/vite';
 
    export default { plugins: [react(), stuntDouble()] };
    ```
 
-4. **Write overrides** in `src/overrides/`, one file per slot, named after it.
+   Other tools: `withStuntDouble(config)` from `stunt-double/next`, `stunt-double/webpack` (also Rspack) or `stunt-double/jest`, and `stuntDoubleEsbuild()` from `stunt-double/esbuild`. See [Tool support](#tool-support).
+
+3. **Write overrides** in `src/overrides/`, one file per slot, named after it.
 
    ```tsx
    // src/overrides/Button.tsx: wraps the SDK default
@@ -63,11 +60,9 @@ This assumes your SDK has adopted slots: socket imports, a `slot-manifest.json`,
    }
    ```
 
-5. **Gate CI.**
+   `npx stunt-double eject Button` writes a typed starter; `npx stunt-double ls` lists the slots.
 
-   ```bash
-   npm ci && npx stunt-double check && npm run build && npm test
-   ```
+**CI:** `npm ci && npx stunt-double check && npm run build && npm test`. **Optional extras** (`npx stunt-double init` lists them): `--editor` (contract errors as IDE squiggles), `--ci`, and `--universal` (a package link for tools without an adapter).
 
 A mistake then looks like this, and `vite build` exits 1:
 
@@ -77,7 +72,7 @@ stunt-double: 2 injection errors (@acme/core@1.0.0)
   [F3] required slot "Logo" has no implementation: create src/overrides/Logo.tsx exporting `Logo` (scaffold: npx stunt-double eject Logo).
 ```
 
-The full list of mistakes, and how each tool reports them, is the [failure catalogue](docs/DESIGN.md#2-failure-catalogue-the-north-star).
+Every code is explained in the [error reference](docs/errors.md). How each tool reports each mistake is the [failure catalogue](docs/DESIGN.md#2-failure-catalogue-the-north-star).
 
 ## Value slots: inject anything, not only components
 
@@ -124,29 +119,29 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 
 | Tool | Integration | Status |
 |---|---|---|
-| Vite 8 (build and dev) | `stuntDouble()` from `stunt-double/vite` | **v0.1.0** |
-| Vitest 5 | the same Vite plugin | **v0.1.0** |
-| Rollup 4 | the same plugin | **v0.1.0** |
-| Rolldown 1 | the same plugin | **v0.1.0** |
-| esbuild | `stuntDoubleEsbuild()` from `stunt-double/esbuild` | planned |
-| webpack 5 | `withStuntDouble()` from `stunt-double/webpack` | planned |
-| Rspack 2 / Rsbuild 2 | `withStuntDouble()` from `stunt-double/webpack` | planned |
-| Next.js 16 (Turbopack and `--webpack`) | `withStuntDouble()` from `stunt-double/next` | planned |
-| Jest 30 | `withStuntDouble()` from `stunt-double/jest` | planned |
-| Storybook 10 (builder-vite, or webpack via `webpackFinal`) | the Vite plugin, or `withStuntDouble()` | planned |
-| React Router 8 / Remix, Astro 7 | the Vite plugin | planned |
-| CRA 5 (craco), Gatsby | `withStuntDouble()` from `stunt-double/webpack` | planned |
+| Vite 8 (build and dev), Vitest 5 | `stuntDouble()` from `stunt-double/vite` | **verified** ([page](docs/tools/vite.md)) |
+| Rollup 4, Rolldown 1 | the same plugin | **v0.1.0** |
+| esbuild 0.28 (JS API) | `stuntDoubleEsbuild()` from `stunt-double/esbuild` | **verified** ([page](docs/tools/esbuild.md)) |
+| webpack 5 | `withStuntDouble()` from `stunt-double/webpack` | **verified** ([page](docs/tools/webpack.md)) |
+| Rspack 2 | `withStuntDouble()` from `stunt-double/webpack` | **verified** ([page](docs/tools/webpack.md)) |
+| Next.js 16 (Turbopack and `--webpack`; build and dev) | `withStuntDouble()` from `stunt-double/next` | **verified** ([page](docs/tools/next.md)) |
+| Jest 30 | `withStuntDouble()` from `stunt-double/jest` | **verified** ([page](docs/tools/jest.md)) |
+| Rsbuild 2, CRA 5 (craco), Gatsby | `withStuntDouble()` from `stunt-double/webpack` through their webpack/Rspack hook | designed |
+| Storybook 10 (builder-vite, or webpack via `webpackFinal`) | the Vite plugin, or `withStuntDouble()` | designed |
+| React Router 8 / Remix, Astro 7 | the Vite plugin | designed |
 | Metro (React Native / Expo) | `withStuntDouble()` from `stunt-double/metro` | planned |
 | Parcel 2 | universal tier + optional `stunt-double/parcel` resolver | planned |
 | Bun 1.4 | `stuntDoubleBun()` from `stunt-double/bun`, or the universal tier | planned |
-| Farm, any other bundler | universal tier: package link + `stunt-double check && <build>` | planned |
+| Farm, any other bundler | universal tier: package link + `stunt-double check && <build>` | works today |
 
 Status key:
 
-- **v0.1.0** means the row is covered by the first milestone of the reference implementation.
-- **planned** means the row is designed in [DESIGN.md §7](docs/DESIGN.md#7-per-tool-integration) but not yet implemented.
+- **verified** means a toolchain suite in `tests/` runs the whole shared mistake catalogue against a real app built with that tool (production build, SSR render, TypeScript 7 and 5.9, and the universal tier).
+- **v0.1.0** means the adapter exists and shares the Vite plugin's code, without a suite of its own.
+- **designed** means the tool uses an existing adapter through its own config hook, as in [DESIGN.md §7](docs/DESIGN.md#7-per-tool-integration), not yet run in a suite.
+- **planned** means the adapter is designed but not written; importing it fails loudly, never silently.
 
-The type gate runs TypeScript 5.9 or 7, whichever the project installs. The quickstart uses npm. The link forms for pnpm, Yarn 4 PnP and Bun are designed in [DESIGN.md §4.4](docs/DESIGN.md#44-wiring-written-by-stunt-double-init).
+The type gate runs TypeScript 5.9 or 7, whichever the project installs. The examples use npm; the link forms for pnpm, Yarn 4 PnP and Bun are in [DESIGN.md §4.4](docs/DESIGN.md#44-wiring-written-by-stunt-double-init).
 
 ## Repository layout
 
@@ -154,9 +149,11 @@ The type gate runs TypeScript 5.9 or 7, whichever the project installs. The quic
 packages/stunt-double/                  the npm package: core, adapters (stunt-double/vite, …) and the CLI
 examples/acme-core/                     fixture product SDK, @acme/core: renders its components through sockets
 examples/acme-core-slots-placeholder/   the registry placeholder, @acme/core-slots (fails on purpose when not wired)
-examples/customer-vite/                 a customer app on Vite + Vitest with overrides in src/overrides/
-tests/                                  the test suite
-docs/                                   design document and decision record
+examples/customer-<tool>/               customer apps with the same overrides in src/overrides/: vite (+ Vitest),
+                                        esbuild, webpack (+ Jest), rspack, next
+tests/                                  the core unit tests run from packages/; one toolchain suite per tool;
+                                        the shared mistake catalogue in tests/mutations/
+docs/                                   design, decision record, error reference, SDK-author guide, tool pages
 ```
 
 ## Running the tests
@@ -167,12 +164,15 @@ From the repository root:
 npm run setup && npm test
 ```
 
-To run one part, use `npm run test:core` for the core unit tests or `npm run test:vite` for the Vite suite.
+To run one part, name it: `npm test -- core` for the core unit tests, `npm test -- vite`, `npm test -- next next-webpack`, and so on (`npm test -- --list` shows them). [tests/README.md](tests/README.md) explains the harness and how to add a toolchain.
 
 ## Docs
 
 - [docs/DESIGN.md](docs/DESIGN.md) is the full design: the failure catalogue, the SDK and project sides, resolution, type safety, per-tool integration, SSR/RSC, rollout, alternatives considered and known limitations.
 - [docs/DECISIONS.md](docs/DECISIONS.md) is the decision record: the designs that competed, why this one won, what was grafted or rejected, and the open questions.
+- [docs/errors.md](docs/errors.md) explains every `[Fx]` code; each report links to its section.
+- [docs/sdk-authors.md](docs/sdk-authors.md) is for the team that publishes the SDK: what to change once, and the `sdk-lint` publish gate.
+- [docs/tools/](docs/tools) has one page per tool; [docs/limitations.md](docs/limitations.md) lists what can still reach runtime.
 
 ## License
 
