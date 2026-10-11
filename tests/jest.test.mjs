@@ -132,6 +132,30 @@ export default withStuntDouble({ testEnvironment: 'jsdom', transformIgnorePatter
   });
 });
 
+describe('universal tier, bare `jest` (no wrapper, no `stunt-double check &&`): what is left to native resolution', () => {
+  const bare = () => jest('-c', 'jest.universal.config.mjs');
+  it('F2a: silent: the stray file is simply unused and the tests pass', () => {
+    MISTAKES.F2a.apply(ws);
+    try { passes(bare()); } finally { ws.reset(); }
+  });
+  it('F3: loud: the stale Logo shim points at a file that no longer exists', () => {
+    MISTAKES.F3.apply(ws);
+    try {
+      const r = bare();
+      assert.notEqual(r.code, 0, explain(r));
+      assert.match(r.out, /Cannot find module '\.\.\/\.\.\/src\/overrides\/Logo\.tsx' from 'sdk-slots\/gen\/Logo\.jsx'/, explain(r));
+    } finally { ws.reset(); }
+  });
+  it('F5: RUNTIME only: babel/swc CommonJS interop turns the missing named export into undefined', () => {
+    MISTAKES.F5.apply(ws);
+    try {
+      const r = bare();
+      assert.notEqual(r.code, 0, explain(r));
+      assert.match(r.out, /Element type is invalid: expected a string .* but got: undefined/, explain(r));
+    } finally { ws.reset(); }
+  });
+});
+
 describe('jest --watch', () => {
   it('the watch plugin regenerates on change: a typo poisons the shims ([F2] in the run), fixing it goes green', async () => {
     const { spawn } = await import('node:child_process');

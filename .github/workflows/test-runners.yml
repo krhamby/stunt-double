@@ -1,0 +1,34 @@
+# Test runners and Storybook / Metro: each suite installs an example project from the .packs/ tarballs into a
+# temp dir and runs the positive checks plus every injection mistake (tests/runners/mistakes.mjs).
+name: test-runners
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [jest, vitest, storybook, metro]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run setup
+      - name: Install Chromium (Vitest browser mode, Storybook render checks)
+        if: matrix.suite == 'vitest' || matrix.suite == 'storybook'
+        run: npx -y playwright@1.64.0 install --with-deps chromium
+      - run: node --test --test-reporter=spec tests/${{ matrix.suite }}.test.mjs
