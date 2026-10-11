@@ -50,7 +50,8 @@ function resolveOutDir({ root, cfg, configSource, overridesDir, sdk, rel }) {
   const problems = [];
   const decl = sdk ? linkDeclaration(root, sdk.slotPackage) : null;
   let outDir = path.resolve(root, cfg.outDir ?? DEFAULT_OUT_DIR);
-  if (decl?.dir) {
+  // a link target outside the project is never written to: checkWiring reports it as [F6]
+  if (decl?.dir && isInside(decl.dir, root)) {
     if (cfg.outDir && path.resolve(root, cfg.outDir) !== decl.dir)
       problems.push(`[CFG] "outDir": "${cfg.outDir}" in ${configSource}, but ${sdk.slotPackage} is linked to ./${rel(decl.dir)} (universal tier): generated files must live in the linked package. Remove "outDir".`);
     outDir = decl.dir;

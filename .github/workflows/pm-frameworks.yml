@@ -30,8 +30,8 @@ jobs:
           bun-version: 1.4.2
       - run: npm ci
       - run: npm run setup
-      - name: unit (type gate under Yarn PnP)
-        run: node --test packages/stunt-double/test/typegate-pnp.test.mjs
+      - name: unit (type gate under Yarn PnP, link declarations)
+        run: node --test packages/stunt-double/test/typegate-pnp.test.mjs packages/stunt-double/test/wiring-links.test.mjs
       - name: package managers x tiers
         run: node --test --test-reporter=spec tests/package-managers.test.mjs
       - name: wiring self-test

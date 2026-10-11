@@ -60,6 +60,22 @@ describe('wiring self-test', { concurrency: 4 }, () => {
       await expectBuildFails('npm', dir, /\[UNRESOLVED_IMPORT\] Could not resolve '\.\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/, name);
   });
 
+  test('Yarn: the placeholder as an explicit file: tarball dependency is the adapter tier (builds; an unwired config says STUNT-DOUBLE-NOT-WIRED)', async () => {
+    // Yarn does not auto-install peers; adding the placeholder by hand gives unwired tools the explanatory error.
+    // Regression: a file: TARBALL used to be taken for a universal-tier link (generation crashed with EEXIST).
+    const dir = makeProject('wiring-yarn-placeholder-dep', 'yarn', 'adapter', { edit: (d, pkg) => {
+      delete pkg.resolutions;
+      pkg.dependencies['@acme/core-slots'] = `file:${path.join(PACKS, 'acme-core-slots-0.0.1.tgz')}`;
+      pkg.scripts['build:unwired'] = 'vite build --config vite.unwired.config.ts';
+      fs.writeFileSync(path.join(d, 'vite.unwired.config.ts'), `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nexport default defineConfig({ plugins: [react()] });\n`);
+    } });
+    assert.equal((await install(pms, 'yarn', dir)).code, 0);
+    const b = await script(pms, 'yarn', dir, 'build');
+    assert.equal(b.code, 0, b.out.slice(-2000));
+    assert.ok(fs.existsSync(path.join(dir, '.stunt-double/gen/Button.jsx')), 'adapter tier generates into .stunt-double/');
+    await expectBuildFails('yarn', dir, /\[UNRESOLVED_IMPORT\] Could not resolve '\.\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/, 'build:unwired');
+  });
+
   describe('npm workspaces with two apps and a hoisted SDK', { concurrency: 1 }, () => {
     test('a link in each app: app B gets app A\'s slot package -> [F6]; bare renders app A\'s overrides', async () => {
       const ws = projectDir('ws-links');

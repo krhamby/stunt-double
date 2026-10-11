@@ -41,7 +41,10 @@ export function linkDeclaration(root, slotPackage) {
     const spec = pkg[field]?.[slotPackage];
     if (typeof spec !== 'string' || !LINK_FORMS.test(spec)) continue;
     if (spec.startsWith('workspace:')) return { field, spec, linkForm: true, dir: workspaceDirs(root, pkg).find(named) ?? null };
-    return { field, spec, linkForm: true, dir: path.resolve(root, spec.replace(LINK_FORMS, '')) };
+    const dir = path.resolve(root, spec.replace(LINK_FORMS, ''));
+    // "file:<tarball>" installs a package (e.g. a vendored placeholder), it links nothing: adapter tier
+    if (/\.(tgz|tar\.gz|tar)$/i.test(dir) || fs.statSync(dir, { throwIfNoEntry: false })?.isFile()) continue;
+    return { field, spec, linkForm: true, dir };
   }
   const ws = workspaceDirs(root, pkg).find(named);
   if (ws) return { field: 'workspaces', spec: path.relative(root, ws).split(path.sep).join('/'), linkForm: true, dir: ws };
