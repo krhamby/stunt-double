@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "sideEffects": false,
-  "description": "Generated slot package for @acme/core (stunt-double). Commit this file; gen/ is generated (npx stunt-double gen). No dependencies or peers, ever.",
+  "description": "The project's slot package for @acme/core (stunt-double universal tier). Commit this file; everything else here is generated. No dependencies or peers, ever.",
   "exports": {
     "./package.json": "./package.json",
     "./*": {

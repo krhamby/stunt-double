@@ -35,36 +35,66 @@ export function packageManagers() {
 export const LINK = { npm: 'file:./sdk-slots', pnpm: 'link:./sdk-slots', yarn: 'portal:./sdk-slots', bun: 'workspace:*' };
 export const YARN_TS5 = 'patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>';
 
-/**
- * Create a project from examples/customer-vite.
- * tier: 'adapter' (stuntDouble() in vite.config.ts) | 'universal' (no plugin; build = stunt-double check && …, build:bare without)
- * opts.sdk: @acme/core variant tarball version; opts.link: override the dependency spec (null = no line)
- */
 export const projectDir = (name) => path.join(WORK, 'projects', name);
 
+export const PLACEHOLDER = () => `file:${path.join(PACKS, 'acme-core-slots-0.0.1.tgz')}`;
+
+/** The committed stub `stunt-double init --universal` writes (the linked slot package; it becomes the outDir). */
+export function writeUniversalStub(dir, rel = 'sdk-slots') {
+  fs.mkdirSync(path.join(dir, rel), { recursive: true });
+  fs.writeFileSync(path.join(dir, rel, 'package.json'), JSON.stringify({
+    name: '@acme/core-slots', version: '0.0.0', private: true, type: 'module', sideEffects: false,
+    exports: { './package.json': './package.json', './*': { types: './gen/*.d.ts', default: './gen/*.jsx' } },
+  }, null, 2) + '\n');
+}
+
+/**
+ * The registry placeholder for the SDK's required peer. A real project gets it from the company registry
+ * (npm, pnpm and Bun auto-install required peers); this repository has no registry, so each package manager's
+ * own override mechanism points the peer at the tarball, as examples/customer-vite does with npm "overrides".
+ */
+export function providePlaceholder(dir, pm, pkg) {
+  if (pm === 'npm' || pm === 'bun') pkg.overrides = { ...pkg.overrides, '@acme/core-slots': PLACEHOLDER() };
+  else if (pm === 'yarn') pkg.resolutions = { ...pkg.resolutions, '@acme/core-slots': PLACEHOLDER() };
+  else if (pm === 'pnpm') fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), `overrides:\n  '@acme/core-slots': '${PLACEHOLDER()}'\n`);
+}
+
+/**
+ * Create a project from examples/customer-vite.
+ * tier: 'adapter'   stuntDouble() in vite.config.ts, no link (the default setup; the placeholder is installed)
+ *       'universal' no plugin; sdk-slots/ stub linked per package manager; build = stunt-double check && …,
+ *                   build:bare without the prefix
+ * opts.sdk: @acme/core variant; opts.link: a dependency spec for @acme/core-slots (adapter tier + link: wiring tests)
+ */
 export function makeProject(name, pm, tier, opts = {}) {
   const dir = projectDir(name);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const src = path.join(REPO, 'examples/customer-vite');
-  for (const f of ['src', 'probes', 'index.html', 'tsconfig.json', 'tsconfig.app.json', 'tsconfig.node.json', 'stunt-double.config.json', 'sdk-slots/package.json', 'vite.config.ts'])
+  for (const f of ['src', 'probes', 'index.html', 'tsconfig.json', 'tsconfig.app.json', 'tsconfig.node.json'])
     fs.cpSync(path.join(src, f), path.join(dir, f), { recursive: true });
   fs.rmSync(path.join(dir, 'src/__tests__'), { recursive: true, force: true });
   const pkg = JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8'));
   pkg.name = name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
+  delete pkg.overrides;
   const tgz = (n) => `file:${path.join(PACKS, n)}`;
   pkg.dependencies['@acme/core'] = tgz(`acme-core-${opts.sdk ?? '1.0.0'}.tgz`);
   pkg.devDependencies['stunt-double'] = tgz('stunt-double-0.1.0.tgz');
   delete pkg.devDependencies.vitest;
-  for (const k of ['test', 'probe:dev', 'dev', 'preview']) delete pkg.scripts[k];
-  const link = opts.link === undefined ? LINK[pm] : opts.link;
-  if (link === null) delete pkg.dependencies['@acme/core-slots'];
-  else pkg.dependencies['@acme/core-slots'] = link;
-  if (pm === 'bun' && link === 'workspace:*') pkg.workspaces = ['sdk-slots'];
+  for (const k of ['test', 'dev', 'preview', 'typecheck']) delete pkg.scripts[k];
+  const link = opts.link !== undefined ? opts.link : tier === 'universal' ? LINK[pm] : null;
+  if (link) {
+    pkg.dependencies['@acme/core-slots'] = link;
+    if (/^(file|link|portal):\.\/sdk-slots$|^workspace:/.test(link)) writeUniversalStub(dir);
+    if (pm === 'bun' && link.startsWith('workspace:')) pkg.workspaces = ['sdk-slots'];
+  } else providePlaceholder(dir, pm, pkg);
   const build = 'vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr';
+  pkg.scripts.build = build;
   if (tier === 'universal') {
     pkg.scripts.build = `stunt-double check && ${build}`;
     pkg.scripts['build:bare'] = build;
+    // fresh clones and bare tools need the shims before anything runs (what `init --universal --editor` adds)
+    pkg.scripts.postinstall = 'stunt-double gen --no-fail';
     fs.writeFileSync(path.join(dir, 'vite.config.ts'), `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -79,18 +109,16 @@ import { stuntDouble } from 'stunt-double/vite';
 export default defineConfig({ plugins: [react(), stuntDouble()] });
 `);
   }
-  const cfg = { sdk: '@acme/core' };
+  const cfg = {};
   if (pm === 'yarn') {
     pkg.packageManager = `yarn@${VERSIONS.yarn}`;
     fs.writeFileSync(path.join(dir, '.yarnrc.yml'), 'nodeLinker: pnp\nenableGlobalCache: false\nenableTelemetry: false\n');
     fs.writeFileSync(path.join(dir, 'yarn.lock'), '');
     if (opts.yarnTs5 !== false) { pkg.devDependencies.typescript5 = YARN_TS5; cfg.typescript = 'typescript5'; }
   }
-  if (pm === 'pnpm') {
-    pkg.packageManager = `pnpm@${VERSIONS.pnpm}`;
-  }
+  if (pm === 'pnpm') pkg.packageManager = `pnpm@${VERSIONS.pnpm}`;
   Object.assign(cfg, opts.config);
-  fs.writeFileSync(path.join(dir, 'stunt-double.config.json'), JSON.stringify(cfg, null, 2) + '\n');
+  if (Object.keys(cfg).length) fs.writeFileSync(path.join(dir, 'stunt-double.config.json'), JSON.stringify(cfg, null, 2) + '\n');
   opts.edit?.(dir, pkg);
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
   return dir;

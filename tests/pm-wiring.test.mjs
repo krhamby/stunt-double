@@ -43,7 +43,7 @@ describe('wiring self-test', { concurrency: 4 }, () => {
 
   for (const tier of ['adapter', 'universal']) {
     test(`Yarn PnP stub with peerDependencies becomes __virtual__: [F8] (${tier})`, async () => {
-      const dir = makeProject(`wiring-yarn-peers-${tier}`, 'yarn', tier, { edit: (d) => editJson(path.join(d, 'sdk-slots/package.json'), (j) => { j.peerDependencies = { react: '*' }; }) });
+      const dir = makeProject(`wiring-yarn-peers-${tier}`, 'yarn', tier, { link: 'portal:./sdk-slots', edit: (d) => editJson(path.join(d, 'sdk-slots/package.json'), (j) => { j.peerDependencies = { react: '*' }; }) });
       assert.equal((await install(pms, 'yarn', dir)).code, 0);
       await expectBuildFails('yarn', dir, /\[F8\] @acme\/core-slots is a Yarn PnP __virtual__ instance because sdk-slots\/package\.json declares peerDependencies/);
       // without stunt-double, Vite cannot resolve the socket from the virtual SDK instance (loud, not silent)
@@ -51,11 +51,13 @@ describe('wiring self-test', { concurrency: 4 }, () => {
     });
   }
 
-  test('placeholder installed instead of the link: [F6] when gated, STUNT-DOUBLE-NOT-WIRED when bare', async () => {
-    const dir = makeProject('wiring-npm-placeholder', 'npm', 'universal', { link: `file:${path.join(PACKS, 'acme-core-slots-0.0.1.tgz')}` });
+  test('no link and no adapter (the placeholder answers): fails closed with STUNT-DOUBLE-NOT-WIRED, chained or bare', async () => {
+    // a universal-tier tool config (no plugin) in a project that never linked sdk-slots: `stunt-double check`
+    // sees the adapter tier (nothing to self-test) and passes; the tool then resolves the registry placeholder
+    const dir = makeProject('wiring-npm-unlinked', 'npm', 'universal', { link: null });
     assert.equal((await install(pms, 'npm', dir)).code, 0);
-    await expectBuildFails('npm', dir, /\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(the registry placeholder: the link is missing or was replaced by an auto-installed peer\), not sdk-slots\//);
-    await expectBuildFails('npm', dir, /\[UNRESOLVED_IMPORT\] Could not resolve '\.\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/, 'build:bare');
+    for (const name of ['build', 'build:bare'])
+      await expectBuildFails('npm', dir, /\[UNRESOLVED_IMPORT\] Could not resolve '\.\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/, name);
   });
 
   describe('npm workspaces with two apps and a hoisted SDK', { concurrency: 1 }, () => {

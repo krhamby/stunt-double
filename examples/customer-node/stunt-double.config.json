@@ -1,1 +1,0 @@
-{ "$schema": "./node_modules/@acme/core/stunt-double.schema.json", "sdk": "@acme/core" }

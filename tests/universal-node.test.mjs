@@ -21,11 +21,11 @@ const NODE_BARE = {
 function copyExample(name, { link } = {}) {
   const dir = projectDir(name);
   fs.rmSync(dir, { recursive: true, force: true });
-  fs.cpSync(path.join(REPO, 'examples/customer-node'), dir, { recursive: true, filter: (f) => !/node_modules|sdk-slots[\\/]gen|stunt-double\.check\.ts/.test(f) });
+  fs.cpSync(path.join(REPO, 'examples/customer-node'), dir, { recursive: true, filter: (f) => !/node_modules/.test(f) && (!/sdk-slots[\\/]/.test(f) || /sdk-slots[\\/]package\.json$/.test(f)) });
   const pkgFile = path.join(dir, 'package.json');
   const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
   for (const deps of [pkg.dependencies, pkg.devDependencies]) for (const [k, v] of Object.entries(deps)) if (v.startsWith('file:../../.packs/')) deps[k] = `file:${path.join(PACKS, v.slice('file:../../.packs/'.length))}`;
-  if (link) pkg.dependencies['@acme/core-slots'] = link;
+  if (link === null) { delete pkg.dependencies['@acme/core-slots']; pkg.overrides = { '@acme/core-slots': `file:${path.join(PACKS, 'acme-core-slots-0.0.1.tgz')}` }; } // the auto-installed registry placeholder
   fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2));
   return dir;
 }
@@ -66,13 +66,13 @@ describe('unknown tool (plain Node ESM + transpile hook), universal tier', { con
   });
 });
 
-test('unknown tool, project NOT linked (placeholder installed): fails closed', async () => {
-  const dir = copyExample('customer-node-unlinked', { link: `file:${path.join(PACKS, 'acme-core-slots-0.0.1.tgz')}` });
+test('unknown tool, project NOT linked (the registry placeholder answers): fails closed', async () => {
+  const dir = copyExample('customer-node-unlinked', { link: null });
   assert.equal((await install(pms, 'npm', dir)).code, 0);
-  const bare = await script(pms, 'npm', dir, 'render:bare');
-  assert.notEqual(bare.code, 0);
-  assert.match(bare.out, /ERR_MODULE_NOT_FOUND[^\n]*node_modules\/@acme\/core-slots\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/);
-  const chained = await script(pms, 'npm', dir, 'render');
-  assert.notEqual(chained.code, 0);
-  assert.match(chained.out, /\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(the registry placeholder/);
+  // without a link `stunt-double check` sees an adapter-tier project and passes; the tool itself then fails
+  for (const name of ['render:bare', 'render']) {
+    const r = await script(pms, 'npm', dir, name);
+    assert.notEqual(r.code, 0, name);
+    assert.match(r.out, /ERR_MODULE_NOT_FOUND[^\n]*node_modules\/@acme\/core-slots\/STUNT-DOUBLE-NOT-WIRED -- @acme core-slots is not provided by this project/, name);
+  }
 });

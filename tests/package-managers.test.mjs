@@ -48,7 +48,7 @@ for (const pm of PMS) {
           dir = makeProject(`${pm}-${tier}`, pm, tier);
           const r = await install(pms, pm, dir);
           assert.equal(r.code, 0, `${pm} install failed:\n${r.out.slice(-3000)}`);
-          assert.ok(fs.existsSync(path.join(dir, 'sdk-slots/gen/Button.jsx')), `postinstall "stunt-double gen --no-fail" did not run under ${pm}`);
+          if (tier === 'universal') assert.ok(fs.existsSync(path.join(dir, 'sdk-slots/gen/Button.jsx')), `postinstall "stunt-double gen --no-fail" did not generate into the linked sdk-slots/ under ${pm}`);
         });
 
         test('builds and renders the overrides in app code and inside the SDK', async () => {

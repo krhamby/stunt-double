@@ -2,7 +2,7 @@
   "name": "customer-node",
   "private": true,
   "version": "0.0.0",
-  "description": "stunt-double's universal tier with a tool that has NO adapter: plain Node ESM plus a tiny TS/JSX loader. Package resolution is Node's own; overrides arrive through the linked @acme/core-slots package.",
+  "description": "stunt-double's universal tier under a tool with NO adapter: plain Node ESM plus a tiny TS/JSX loader. Package resolution is Node's own; overrides arrive through the linked @acme/core-slots package (sdk-slots/, written by `stunt-double init --universal`).",
   "type": "module",
   "scripts": {
     "postinstall": "stunt-double gen --no-fail",
