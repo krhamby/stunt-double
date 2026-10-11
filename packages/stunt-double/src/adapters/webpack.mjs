@@ -21,7 +21,7 @@ const NAME = 'stunt-double';
 /** @param {import('./webpack.d.ts').StuntDoubleWebpackOptions} [opts] */
 export function withStuntDouble(config = {}, opts = {}) {
   const { typecheck = true, audit = true, mode, ...genOpts } = opts;
-  const root = path.resolve(opts.root ?? process.cwd());
+  const root = path.resolve(opts.root ?? config.context ?? process.cwd());
   const p = generate({ ...genOpts, root, onError: 'return' });
   config.resolve ??= {};
   if (p.sdk) {
