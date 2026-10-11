@@ -1,0 +1,29 @@
+{
+  "name": "customer-rspack",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A project that injects its own components and services into @acme/core with stunt-double (Rspack 2, builtin:swc-loader).",
+  "type": "module",
+  "scripts": {
+    "build": "rspack build --mode production",
+    "dev": "rspack build --mode development --watch",
+    "typecheck": "tsc --noEmit",
+    "probe": "node probes/render.mjs"
+  },
+  "dependencies": {
+    "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@rspack/cli": "2.2.8",
+    "@rspack/core": "2.2.8",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
+    "typescript": "7.0.2"
+  },
+  "overrides": {
+    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz"
+  }
+}
