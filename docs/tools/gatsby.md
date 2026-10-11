@@ -30,7 +30,7 @@ export const onCreateWebpackConfig = ({ actions, getConfig }) => {
 };
 ```
 
-You don't need tsconfig edits, a postinstall, an `@acme/core-slots` dependency or a `stunt-double check &&` prefix: the type gate runs inside `gatsby build`. Generated files go to `.stunt-double/`.
+No other change is needed: no tsconfig edits, postinstall, `@acme/core-slots` dependency or `stunt-double check &&` prefix. The type gate runs inside `gatsby build`. Generated files go to `.stunt-double/`.
 
 Two plain Gatsby 5 requirements apply here too. Neither is specific to stunt-double:
 
@@ -60,15 +60,12 @@ On an interactive terminal, Gatsby's default ink logger wraps messages at 80 col
 | F7a–d, F8, F9b | Self-import, duplicate React, `server-only` in a client slot | exit 1, STA `[F7]` / `[F8]` / `[F9]` | F7: overlay; clears on fix |
 | F9c | Async override in a client slot | exit 1, TYP `[F9]` | |
 
-Timing (4 CPUs):
-- **Failing build:** about 12 s.
-- **Passing build:** about 30 s (cold `.cache`).
-- **Full suite:** about 13 minutes. That is over the harness's 10-minute target, because Gatsby builds are slow.
+On 4 CPUs, a failing `gatsby build` takes about 12 s and a passing one about 30 s (cold `.cache`). The suite takes about 13 minutes, over the harness's 10-minute target.
 
 The TypeScript 5.9 rerun and the universal tier are not run for Gatsby. They exercise no Gatsby-specific code, and the Rsbuild, webpack and Rspack suites run them with the same adapter.
 
 ## Known gaps
 
-1. **`webpack-node-externals` can't be used with Gatsby.** Externalizing `node_modules` in the `build-html` stage breaks Gatsby's own HTML renderer under React 19 (`TypeError: Cannot read properties of undefined (reading 'ContextRegistry')`). The crash comes from React internals, not from stunt-double code, and the adapter still kept `@acme/core` bundled (no `require("@acme/core")` in `render-page.js`). The shared "node-externals must pass" scenario is skipped for Gatsby with that reason. A RegExp external that captures the SDK is still caught (F6c above).
+1. `webpack-node-externals` can't be used with Gatsby. Externalizing `node_modules` in the `build-html` stage breaks Gatsby's own HTML renderer under React 19 (`TypeError: Cannot read properties of undefined (reading 'ContextRegistry')`). The TypeError is thrown inside React. The adapter still kept `@acme/core` bundled (no `require("@acme/core")` in `render-page.js`). The shared "node-externals must pass" scenario is skipped for Gatsby with that reason. A RegExp external that captures the SDK is still caught (F6c above).
 
-2. **Removing an override is slower to show in `gatsby develop`.** The SDK default renders without a restart, but it took about 10 s to appear in the browser. Adding an override back, or a mistake reaching the overlay, took about 1 s. The times are from the test run and include its 1.5 s stability hold.
+2. Removing an override is slower to show in `gatsby develop`. The SDK default renders without a restart, but it took about 10 s to appear in the browser. Adding an override back, or a mistake reaching the overlay, took about 1 s. The times are from the test run and include its 1.5 s stability hold.

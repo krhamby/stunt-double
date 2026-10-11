@@ -37,25 +37,20 @@ export default defineConfig({
 });
 ```
 
-That's all. You don't need tsconfig edits, a postinstall, an `@acme/core-slots` dependency or a `stunt-double check &&` prefix: the type gate runs inside `rsbuild build`. Generated files go to `.stunt-double/`, which has its own `.gitignore`.
+No other change is needed: no tsconfig edits, postinstall, `@acme/core-slots` dependency or `stunt-double check &&` prefix. The type gate runs inside `rsbuild build`. Generated files go to `.stunt-double/`, which has its own `.gitignore`.
 
-What it does:
+At every start and every dev rebuild, the adapter validates `src/overrides` and regenerates the shims. Each `@acme/core-slots/<Slot>` is aliased to its shim in every environment. During compilation it runs the contract type check and the module-graph audit. Every mistake goes to `compilation.errors`, so `rsbuild build` exits 1 and `rsbuild dev` shows the Rsbuild error overlay.
 
-- **Every start and every dev rebuild:** validates `src/overrides` and regenerates the shims.
-- **Aliases:** each `@acme/core-slots/<Slot>` points to its shim, in every environment.
-- **During compilation:** runs the contract type check and the module-graph audit.
-- **Error reporting:** every mistake goes to `compilation.errors`. `rsbuild build` exits 1, and `rsbuild dev` shows the Rsbuild error overlay.
+Rsbuild options to avoid:
 
-Two things to know:
-
-- **Don't put the SDK in `resolve.dedupe`.** Rsbuild implements dedupe as a directory alias, which bypasses the SDK's `package.json` `exports` subpaths. The build then fails with `Cannot find module '@acme/core/original/Button' for matched aliased key '@acme/core'`. Dedupe `react` and `react-dom` only.
-- **Don't add tsconfig `paths` for `@acme/core-slots/*`.** Rsbuild's default `resolve.aliasStrategy: 'prefer-tsconfig'` hands the tsconfig to Rspack, and `paths` then win over the adapter's aliases at bundle time:
-  - If the `paths` point at the generated shims, a config **without** the adapter renders the last generated shims instead of failing on the registry placeholder (observed with the earlier setup that had such a `paths` entry).
+- Don't put the SDK in `resolve.dedupe`. Rsbuild implements dedupe as a directory alias, which bypasses the SDK's `package.json` `exports` subpaths. The build then fails with `Cannot find module '@acme/core/original/Button' for matched aliased key '@acme/core'`. Dedupe `react` and `react-dom` only.
+- Don't add tsconfig `paths` for `@acme/core-slots/*`. Rsbuild's default `resolve.aliasStrategy: 'prefer-tsconfig'` hands the tsconfig to Rspack, and `paths` then win over the adapter's aliases at bundle time:
+  - If the `paths` point at the generated shims, a config without the adapter renders the last generated shims instead of failing on the registry placeholder (observed with the earlier setup that had such a `paths` entry).
   - If they point anywhere else, the build fails with `[F6] @acme/core imports @acme/core-slots/X but …/X.jsx is not in the bundle`.
 
 ## Which mistake fails where
 
-Stages: **STA** is the generator at compilation start. **TYP** is the contract type gate, about 200 ms with TS 7.0.2. **AUD** is the module-graph audit. **RES** is Rspack's own resolution or linking.
+Stages: STA is the generator at compilation start, TYP the contract type gate (about 200 ms with TS 7.0.2), AUD the module-graph audit, RES Rspack's own resolution or linking.
 
 Every mistake prints its `[Fx]` line once per environment, so with `web` + `node` you see it twice. Every row below was observed with `rsbuild build` in the test suite.
 
@@ -77,22 +72,18 @@ Every mistake prints its `[Fx]` line once per environment, so with `web` + `node
 | F6g (plugin) | A plugin in `tools.rspack` resolves a socket elsewhere | exit 1, AUD `[F6] … is not in the bundle` | |
 | F6h | Override added or removed since the last generation | prevented: regenerated at every start | prevented: both environments compile the new decision in the first rebuild |
 | F7a–d | Override reaches its own slot (socket, barrel, helper, namespace) | exit 1, STA `[F7]` | F7: overlay; clears on fix |
-| F8 | Duplicate React (`1.0.0-nested-react`) | exit 1, STA `[F8] "react" resolves to 2 copies`, **with or without** `resolve.dedupe` | |
+| F8 | Duplicate React (`1.0.0-nested-react`) | exit 1, STA `[F8] "react" resolves to 2 copies`, with or without `resolve.dedupe` | |
 | F9b | Client-slot override imports `server-only` | exit 1, STA `[F9]` | |
 | F9c | Async override in a client slot | exit 1, TYP `[F9]` | |
 
 The type-gate rows also hold with TypeScript 5.9 (`"typescript": "typescript5"`). Without the adapter (universal tier: the package link plus `stunt-double check && rsbuild build`), the check catches F1a, F2a, F3a, F5a and F7b. Without the `check &&` prefix, a typo'd new override is silently unused (R1).
 
-Timing (4 CPUs):
-- **Production build of both environments:** about 0.7 to 2 s.
-- **Full suite:** 57 tests in about 2 minutes.
+On 4 CPUs, a production build of both environments takes about 0.7 to 2 s, and the suite (59 tests) about 2 minutes.
 
 ## Known gaps
 
-1. **F8 with `resolve.dedupe` still fails the build.**
-
-   With `dedupe: ['react', 'react-dom']`, the bundle really does contain a single React. Verified by disabling only the install preflight in a scratch copy: the build passed and rendered the overrides in the app and in the SDK internals. Without dedupe, the AUD audit reports `[F8] "react" is bundled from 2 locations`.
+1. F8 with `resolve.dedupe` still fails the build. With `dedupe: ['react', 'react-dom']`, the bundle really does contain a single React. Verified by disabling only the install preflight in a scratch copy: the build passed and rendered the overrides in the app and in the SDK internals. Without dedupe, the AUD audit reports `[F8] "react" is bundled from 2 locations`.
 
    The STA preflight checks the install, not the bundle. It fails the build whenever `@acme/core` sees its own React copy, even when dedupe would make the bundle correct. This fails closed. Fix the install (dedupe your lockfile) rather than relying on `resolve.dedupe`.
 
-2. **One extra dev rebuild per decision change.** When you add or remove an override, or make or fix a typo, the first rebuild already compiles the new decision in every environment. The watcher then sees the regenerated shims and runs one more rebuild that changes nothing.
+2. Each decision change in `rsbuild dev` causes one extra rebuild. When you add or remove an override, or make or fix a typo, the first rebuild already compiles the new decision in every environment. The watcher then sees the regenerated shims and runs one more rebuild that changes nothing.
