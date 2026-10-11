@@ -56,7 +56,14 @@ export function stuntDouble(opts = {}) {
     if (onError === 'throw') throw new StuntDoubleError(formatProblems(next), next.problems);
     return next;
   };
-  const fail = (lines) => { throw new StuntDoubleError(formatReport(header(p, lines.length), lines), lines); };
+  // Storybook (builder-vite) prints a build error through its own logger, which word-wraps at 80 columns and
+  // breaks file paths and [Fx] lines apart. Under Storybook the report also goes to stderr verbatim.
+  let storybook = false;
+  const raise = (message, lines = []) => {
+    if (storybook) process.stderr.write(`${message}\n`);
+    throw new StuntDoubleError(message, lines);
+  };
+  const fail = (lines) => raise(formatReport(header(p, lines.length), lines), lines);
 
   const tripwire = {
     name: `${PLUGIN}:optimizer-tripwire`,
@@ -100,8 +107,9 @@ export function stuntDouble(opts = {}) {
 
     // ---- CFG guards ---------------------------------------------------------------------------------
     async configResolved(c) {
+      storybook = (c.plugins ?? []).some((x) => String(x?.name ?? '').startsWith('storybook:'));
       if (!p?.sdk) {
-        if (command === 'build' && !vitest && p?.problems.length) throw new StuntDoubleError(formatProblems(p), p.problems);
+        if (command === 'build' && !vitest && p?.problems.length) raise(formatProblems(p), p.problems);
         return;
       }
       const pk = p.packages;
@@ -127,11 +135,11 @@ export function stuntDouble(opts = {}) {
       // prints it as the bare report (exit 1). The same failure from buildStart would reach the terminal wrapped
       // in Rolldown's aggregate error and its stack trace.
       if (command === 'build' && !vitest) {
-        if (p.problems.length) throw new StuntDoubleError(formatProblems(p), p.problems);
+        if (p.problems.length) raise(formatProblems(p), p.problems);
         if (typecheck !== false) {
           gate ??= runTypeGate(p);
           const r = await gate;
-          if (!r.ok) throw new StuntDoubleError(r.message, r.lines ?? []);
+          if (!r.ok) raise(r.message, r.lines ?? []);
         }
         checkedAtConfig = true;
       }
