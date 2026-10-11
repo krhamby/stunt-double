@@ -78,7 +78,9 @@ export function stuntDouble(opts = {}) {
         if (env.consumer === 'server') for (const n of pk) {
           const external = env.resolve?.external;
           const explicitlyExternal = Array.isArray(external) && external.includes(n);
-          if ((explicitlyExternal || !covered(env.resolve?.noExternal, n)) && !covered(inline, n))
+          // test.server.deps.inline only rescues an externalized SDK under Vitest. stuntDouble() always sets it,
+          // so honouring it in `vite build` would disable this guard for every SSR / framework server build.
+          if ((explicitlyExternal || !covered(env.resolve?.noExternal, n)) && !(vitest && covered(inline, n)))
             throw new StuntDoubleError(`[F6] Vite environment "${name}" externalizes ${n}: Node would load it natively and slot overrides could not apply there. Keep stunt-double's ssr.noExternal${explicitlyExternal ? ` (remove "${n}" from ssr.external / resolve.external)` : ''}.`);
         }
         if ((env.optimizeDeps?.include ?? []).some((i) => i === p.sdk.slotPackage || i.startsWith(p.sdk.slotPackage + '/')))
