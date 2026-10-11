@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [esbuild, rollup, rolldown, farm] # parcel, bun: added when their branches are merged
+        suite: [esbuild, rollup, rolldown, farm, parcel, bun]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,6 +35,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      - name: Install Playwright + Chromium (Parcel R5 browser check)
+        if: matrix.suite == 'parcel'
+        run: npm i -g playwright@1.56.1 && npx -y playwright@1.56.1 install --with-deps chromium
       - run: npm ci
       - run: npm run setup
       - run: node --test tests/${{ matrix.suite }}.test.mjs
