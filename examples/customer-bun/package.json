@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "postinstall": "stunt-double gen --no-fail",
+    "dev": "bun ./index.html",
     "build": "bun build.ts",
     "test": "stunt-double check && bun test",
     "typecheck": "tsc --noEmit",

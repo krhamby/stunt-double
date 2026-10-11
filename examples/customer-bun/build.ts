@@ -4,8 +4,8 @@ import { stuntDoubleBun } from 'stunt-double/bun';
 
 const sd = stuntDoubleBun();
 
-// Browser bundle (what ships).
-await Bun.build({ entrypoints: ['./src/main.tsx'], outdir: './dist', target: 'browser', minify: true, plugins: [sd] });
+// Browser app (what ships): index.html -> dist/index.html + hashed chunks.
+await Bun.build({ entrypoints: ['./index.html'], outdir: './dist', target: 'browser', minify: true, plugins: [sd] });
 
 // SSR bundle for Node (render probe): everything bundled, so @acme/core and the overrides are inlined.
 await Bun.build({ entrypoints: ['./src/entry-server.tsx'], outdir: './dist-ssr', target: 'node', format: 'esm', plugins: [sd] });

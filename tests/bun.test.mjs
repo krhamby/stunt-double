@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseRenderOutput, summarize, compareRender } from './harness/markers.mjs';
 
@@ -118,7 +118,9 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     const b = cmd.build(dir);
     passes(b);
     assertRender(cmd.probe(dir), POSITIVE);
-    for (const f of ['dist/main.js', 'dist-ssr/entry-server.js']) {
+    const chunks = fs.readdirSync(path.join(dir, 'dist')).filter((f) => f.endsWith('.js')).map((f) => `dist/${f}`);
+    assert.ok(chunks.length > 0 && fs.existsSync(path.join(dir, 'dist/index.html')), 'dist/index.html + chunks');
+    for (const f of [...chunks, 'dist-ssr/entry-server.js']) {
       const js = fs.readFileSync(path.join(dir, f), 'utf8');
       assert.ok(!js.includes('SDK_DEFAULT_PRICETAG'), `${f} contains the replaced PriceTag default`);
       assert.ok(js.includes('BRAND_LOGO'), `${f} lacks the Logo override`);
@@ -172,6 +174,74 @@ plugin({ name: 'rt', setup(b) { b.onResolve({ filter: /^@acme\\/core-slots\\// }
     const r = run(BUN, ['test', '--preload', './preload.ts'], dir);
     fails(r, /Cannot find module '@acme\/core-slots\/Button'/);
     assert.doesNotMatch(r.out, /RUNTIME-ONRESOLVE/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Dev server: `bun ./index.html` with bunfig.toml [serve.static] plugins = ["stunt-double/bun"].
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let nextPort = 4700 + (process.pid % 200);
+
+function devServer(dir) {
+  const port = nextPort++;
+  const child = spawn(BUN, [`--port=${port}`, './index.html'], { cwd: dir, env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = '';
+  child.stdout.on('data', (d) => { log += d; });
+  child.stderr.on('data', (d) => { log += d; });
+  const url = `http://localhost:${port}`;
+  const get = async (p = '/') => { try { const r = await fetch(url + p); return { status: r.status, body: await r.text() }; } catch { return { status: 0, body: '' }; } };
+  /** the page and its client bundle */
+  const page = async () => {
+    const html = await get('/');
+    const src = /<script[^>]+src="([^"]+\.js)"/.exec(html.body)?.[1];
+    const js = src ? await get(src) : { status: 0, body: '' };
+    return { status: html.status, js };
+  };
+  const until = async (what, fn, ms = 20_000) => {
+    const t0 = Date.now();
+    for (;;) {
+      const v = await fn();
+      if (v) return v;
+      if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}\n--- dev server log ---\n${rel(log).slice(-3000)}`);
+      await sleep(100);
+    }
+  };
+  return { child, page, until, get log() { return log; }, stop: () => child.kill('SIGKILL') };
+}
+
+describe('dev server: bun ./index.html', { skip: !selected('dev') }, () => {
+  test('renders the overrides; an injection error shows in Bun\'s error page and clears on fix', async () => {
+    const dir = project('dev');
+    const s = devServer(dir);
+    try {
+      const ok = await s.until('the page', async () => { const p = await s.page(); return p.status === 200 && p.js.status === 200 && p; });
+      assert.match(ok.js.body, /BRAND_LOGO/);
+      assert.doesNotMatch(ok.js.body, /SDK_DEFAULT_PRICETAG/);
+
+      const logo = path.join(dir, 'src/overrides/Logo.tsx');
+      const saved = fs.readFileSync(logo, 'utf8');
+      fs.rmSync(logo);
+      // the plugin's watcher poisons the shims; Bun rebuilds and serves its error page (HTTP 500)
+      await s.until('the poisoned shims', () => fs.readFileSync(path.join(dir, 'sdk-slots/gen/Button.jsx'), 'utf8').includes('STUNT-DOUBLE-ERROR -- [F3]'));
+      const bad = await s.until('HTTP 500', async () => { const p = await s.page(); return p.status === 500 && p; });
+      assert.equal(bad.status, 500);
+      await s.until('[F3] on the dev server output', () => /\[F3\] required slot "Logo" has no implementation/.test(s.log) && /Could not resolve: "\.\/STUNT-DOUBLE-ERROR -- \[F3\]/.test(s.log));
+
+      fs.writeFileSync(logo, saved);
+      const fixed = await s.until('the fixed page', async () => { const p = await s.page(); return p.status === 200 && p.js.status === 200 && /BRAND_LOGO/.test(p.js.body) && p; });
+      assert.match(fixed.js.body, /BRAND_LOGO/);
+      assert.match(s.log, /stunt-double: injection errors fixed/);
+    } finally { s.stop(); }
+  });
+
+  test('cold start with a mistake: the server stays up and serves the error page with the [Fx] line', async () => {
+    const dir = project('dev-cold', (d) => fs.renameSync(path.join(d, 'src/overrides/Button.tsx'), path.join(d, 'src/overrides/Buton.tsx')));
+    const s = devServer(dir);
+    try {
+      await s.until('HTTP 500', async () => (await s.page()).status === 500);
+      await s.until('[F2] on the dev server output', () => /\[F2\] src\/overrides\/Buton\.tsx overrides unknown slot "Buton"/.test(s.log));
+      assert.equal(s.child.exitCode, null, 'dev server still running');
+    } finally { s.stop(); }
   });
 });
 
@@ -313,7 +383,7 @@ const hijack = { name: 'hijack', setup(b: any) { b.onResolve({ filter: /^@acme\\
     },
     build: (r, dir) => {
       fails(r, /\[F6\] .*imports the SDK default of slot "Button".*directly|\[F6\] @acme\/core imports @acme\/core-slots\/Button but sdk-slots\/gen\/Button\.jsx is not in the bundle/);
-      assert.ok(!fs.existsSync(path.join(dir, 'dist/main.js')), 'the adapter removes the outputs of a failed audit');
+      assert.ok(!fs.readdirSync(path.join(dir, 'dist')).some((f) => f.endsWith('.js')), 'the adapter removes the outputs of a failed audit');
     },
     check: OK, bare: null, test: null, // only a build-script plugin can do this
   },

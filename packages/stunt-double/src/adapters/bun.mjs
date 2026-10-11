@@ -9,6 +9,12 @@
 //              from node_modules files; the Bun RUNTIME / `bun test` does not: those use the workspace link)
 //   onEnd      AUD: metafile graph audit -> remove the written outputs and throw
 //
+// Dev server (`bun ./index.html` / Bun.serve HTML routes, plugin listed in bunfig.toml [serve.static] plugins):
+// Bun 1.4.2 runs onStart once, never onEnd, and rebuilds without calling back on file edits [V]. There the
+// plugin writes POISONED shims and watches src/overrides itself, so every injection error shows up in Bun's
+// error overlay as an unresolved './STUNT-DOUBLE-ERROR -- [Fx] ...' import, and clears on fix. The type gate
+// runs in the background and prints to stderr (dev never blocks on types, like every dev server).
+//
 // Bun 1.4.2 [V]: a throw or rejected promise in setup, onStart or onEnd rejects the Bun.build() promise
 // whether `throw` is true or false (it never becomes `{ success: false }`), so an unawaited-catch build
 // script exits 1. Outputs are already on disk when onEnd runs, hence the cleanup.
@@ -16,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
+import { watchProject } from '../core/watch.mjs';
 import { auditGraph, esbuildGraph } from '../core/audit.mjs';
 import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
 import { esc, isInside } from '../core/util.mjs';
@@ -27,6 +34,7 @@ export function stuntDoubleBun(opts = {}) {
   const { typecheck = true, audit = true, ...genOpts } = opts;
   let p = null;
   let warned = false;
+  let watcher = null;
 
   const fail = (message, problems = []) => {
     const e = new StuntDoubleError(message, problems);
@@ -43,6 +51,8 @@ export function stuntDoubleBun(opts = {}) {
     name: PLUGIN,
     setup(build) {
       const root = path.resolve(opts.root ?? build.config?.root ?? process.cwd());
+      // Bun.build always has entrypoints; the static dev server's config has none (it bundles HTML routes).
+      if (build.config && !build.config.entrypoints) return serveMode(build, root);
       // generate() is synchronous and cheap; setup may run once per target, the result is identical.
       p ??= generate({ ...genOpts, root, onError: 'return' });
       if (audit !== false && build.config) build.config.metafile = true;
@@ -57,14 +67,7 @@ export function stuntDoubleBun(opts = {}) {
         if (!r.ok) fail(r.message, r.lines ?? []);
       });
 
-      const slotPackage = p.sdk?.slotPackage;
-      if (slotPackage) {
-        build.onResolve({ filter: new RegExp(`^${esc(slotPackage)}/[A-Za-z0-9_]+$`) }, (args) => {
-          const slot = args.path.slice(slotPackage.length + 1);
-          // Unknown slot: let native resolution fail on the link (gen/<Slot>.jsx does not exist).
-          return p.sdk?.slots[slot] ? { path: p.shimFile(slot) } : undefined;
-        });
-      }
+      resolveSockets(build);
 
       build.onEnd((result) => {
         if (audit === false || !p?.sdk || !result?.success) return;
@@ -77,6 +80,42 @@ export function stuntDoubleBun(opts = {}) {
       });
     },
   };
+
+  function resolveSockets(build) {
+    const slotPackage = p?.sdk?.slotPackage;
+    if (!slotPackage) return;
+    build.onResolve({ filter: new RegExp(`^${esc(slotPackage)}/[A-Za-z0-9_]+$`) }, (args) => {
+      const slot = args.path.slice(slotPackage.length + 1);
+      // Unknown slot: let native resolution fail on the link (gen/<Slot>.jsx does not exist).
+      return p.sdk?.slots[slot] ? { path: p.shimFile(slot) } : undefined;
+    });
+  }
+
+  function serveMode(build, root) {
+    const gate = (cur) => {
+      if (typecheck === false || !cur.sdk || cur.problems.length) return;
+      // force: the memo key covers decisions, not override contents (an edit can fix or break types)
+      runTypeGate(cur, { force: true }).then((r) => { if (!r.ok) console.error(r.message); }, () => {});
+    };
+    if (!p) {
+      p = generate({ ...genOpts, root, onError: 'poison' });
+      if (p.problems.length) console.error(formatProblems(p));
+      warn();
+      gate(p);
+    }
+    if (p.sdk && !watcher) {
+      watcher = watchProject(p, {
+        onError: 'poison',
+        onChange: (next, _prev, e) => {
+          if (e) return console.error(`${PLUGIN}: ${e.message}`);
+          p = next;
+          if (next.problems.length) console.error(formatProblems(next));
+          else { console.error(`${PLUGIN}: injection errors fixed`); gate(next); }
+        },
+      });
+    }
+    resolveSockets(build);
+  }
 }
 
 /** Bun metafile -> graph. Keys are relative to the working directory; the namespace prefix is stripped. */
@@ -93,4 +132,10 @@ function removeOutputs(outputs, outdir) {
   }
 }
 
+
+
+// bunfig.toml `[serve.static] plugins = ["stunt-double/bun"]` loads the DEFAULT export as a plugin object:
+// make the factory usable as one too (default options).
+Object.defineProperty(stuntDoubleBun, 'name', { value: PLUGIN });
+stuntDoubleBun.setup = (build) => stuntDoubleBun().setup(build);
 export default stuntDoubleBun;
