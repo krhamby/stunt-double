@@ -101,7 +101,7 @@ the same mechanism (no stunt-double code runs).
 
 "exit 1 at config load" means Jest prints the `stunt-double: N injection errors` block and runs no test.
 
-**Watch mode.** `jest --watch` / `--watchAll` loads the config once. The watch plugin regenerates on every change.
+**Watch mode.** `jest --watchAll` loads the config once. The watch plugin regenerates on every change.
 A new mistake poisons the shims, so the tests that render the slot fail with the `[Fx]` text (for example
 `Cannot find module './STUNT-DOUBLE-ERROR -- [F2] src overrides Buton.tsx …'`), and the full message is printed
 after the run. Fixing the file turns the run green again.
@@ -111,6 +111,10 @@ after the run. Fixing the file turns the run green again.
 - **Contract errors (F1, F9c) do not fail plain `jest`.** Jest's transformers strip types. Use `{ typecheck: true }`
   or chain `stunt-double check` in CI (`"ci": "stunt-double check && jest"`). With `{ typecheck: true }`, a type
   error anywhere in an override or the files it imports also fails Jest's startup.
+- **Use `jest --watchAll`, not `jest --watch`.** In changed-files mode Jest only re-runs tests it can link to the
+  changed file, and its dependency graph stops at `node_modules/@acme/core`. An edited override is never linked to
+  the tests that render it through the SDK, so Jest reports "No tests found related to files changed" (observed,
+  also with `haste.retainAllFiles`). `--watchAll` re-runs everything and picks up the regenerated shims.
 - **Jest has no dev overlay.** Inside `jest --watch` the signal is a failing test carrying the `[Fx]` text.
 - **The root is not the config file's directory.** If you run `jest -c path/to/jest.config.mjs` from another
   directory, pass `withStuntDouble(config, { root: import.meta.dirname })` (or set `rootDir`).
