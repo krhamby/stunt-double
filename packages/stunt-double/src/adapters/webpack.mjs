@@ -59,11 +59,11 @@ export class StuntDoublePlugin {
       // the generation made by withStuntDouble() at config time is fresh for the first run
       if (this.fresh) { this.fresh = false; return; }
       this.p = generate({ ...genOpts, root: this.p.root, onError });
-      if (this.p.changedFiles.length) {
-        // shim contents changed behind the same paths: drop them from the cached input file system
-        const fsys = compiler.inputFileSystem;
-        if (typeof fsys?.purge === 'function') fsys.purge(this.p.changedFiles);
-      }
+      // Shim contents changed behind the same paths, and an override may have appeared where a stat said
+      // "missing": drop both directories (purge takes path prefixes) from the cached input file system, or a
+      // fixed mistake keeps failing on a stale "Can't resolve" until restart.
+      const fsys = compiler.inputFileSystem;
+      if (typeof fsys?.purge === 'function') fsys.purge([this.p.overridesDir, this.p.genDir, ...this.p.changedFiles]);
     };
     compiler.hooks.beforeRun.tap(NAME, () => regen('return'));
     compiler.hooks.watchRun.tap(NAME, () => regen('poison'));

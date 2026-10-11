@@ -2,13 +2,14 @@
   "name": "customer-webpack",
   "private": true,
   "version": "0.0.0",
-  "description": "A project that injects its own components and services into @acme/core with stunt-double (webpack 5 + Babel 8).",
+  "description": "A project that injects its own components and services into @acme/core with stunt-double (webpack 5 + Babel 8, Jest 30).",
   "type": "module",
   "scripts": {
     "build": "webpack --mode production",
     "dev": "webpack --mode development --watch",
     "typecheck": "tsc --noEmit",
-    "probe": "node probes/render.mjs"
+    "probe": "node probes/render.mjs",
+    "test": "jest"
   },
   "dependencies": {
     "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
@@ -17,11 +18,14 @@
   },
   "devDependencies": {
     "@babel/core": "8.0.7",
+    "@babel/preset-env": "8.0.7",
     "@babel/preset-react": "8.0.1",
     "@babel/preset-typescript": "8.0.7",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "babel-jest": "30.5.2",
     "babel-loader": "10.1.1",
+    "jest": "30.5.2",
     "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
     "typescript": "7.0.2",
     "webpack": "5.111.1",

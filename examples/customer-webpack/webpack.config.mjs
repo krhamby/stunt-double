@@ -15,7 +15,8 @@ function configs(mode) {
           exclude: /node_modules/,
           use: {
             loader: 'babel-loader',
-            options: { presets: ['@babel/preset-typescript', ['@babel/preset-react', { runtime: 'automatic', development: mode === 'development' }]] },
+            // babel.config.json is Jest's (CommonJS output); the bundles keep ES modules
+            options: { configFile: false, babelrc: false, presets: ['@babel/preset-typescript', ['@babel/preset-react', { runtime: 'automatic', development: mode === 'development' }]] },
           },
         },
       ],
