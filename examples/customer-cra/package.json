@@ -4,16 +4,13 @@
   "version": "0.0.0",
   "description": "A project that injects its own components into @acme/core with stunt-double (Create React App 5 via craco 7).",
   "scripts": {
-    "postinstall": "stunt-double gen --no-fail",
     "start": "craco start",
     "build": "craco build",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "stunt-double check",
     "probe": "node probes/render.mjs build"
   },
   "dependencies": {
     "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
-    "@acme/core-slots": "file:./sdk-slots",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -27,10 +24,19 @@
     "typescript": "5.9.3"
   },
   "overrides": {
+    "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz",
     "typescript": "5.9.3"
   },
   "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }
