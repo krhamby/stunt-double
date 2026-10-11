@@ -73,6 +73,7 @@ function matches(s, want) {
 const port = await freePort();
 const child = spawn(process.execPath, [path.join(root, 'node_modules/@craco/craco/dist/bin/craco.js'), 'start'], {
   cwd: root, env: { ...process.env, BROWSER: 'none', PORT: String(port), CI: 'true', FAST_REFRESH: 'true' }, stdio: ['ignore', 'pipe', 'pipe'],
+  detached: true, // craco start forks the dev server: stop the whole process group
 });
 let log = '';
 child.stdout.on('data', (d) => { log += d; });
@@ -110,7 +111,10 @@ try {
 } finally {
   restore();
   await browser?.close();
-  child.kill('SIGTERM');
+  const exited = new Promise((ok) => (child.exitCode != null ? ok() : child.once('exit', ok)));
+  try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+  await Promise.race([exited, sleep(10_000)]);
+  try { process.kill(-child.pid, 'SIGKILL'); } catch {}
 }
 console.log('STUNT-DOUBLE-DEV ' + JSON.stringify(results));
 process.exit(results.length === scenario.length && results.every((r) => r.ok) ? 0 : 1);

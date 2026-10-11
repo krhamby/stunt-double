@@ -30,13 +30,11 @@ const npmInstall = (d, ...args) => execFileSync('npm', ['install', '--no-audit',
 const NPM_CASES = new Set(['F2b', 'F6a', 'F8']); // they reinstall @acme/core: full copy, never write through hard links
 
 let n = 0;
-const made = [];
 function fresh({ full = false } = {}) {
   const d = path.join(tmp, `case-${++n}`);
   fs.mkdirSync(d);
   for (const e of fs.readdirSync(base)) if (e !== 'node_modules') execFileSync('cp', ['-a', path.join(base, e), d]);
   execFileSync('cp', [full ? '-a' : '-al', path.join(base, 'node_modules'), path.join(d, 'node_modules')]);
-  made.push(d);
   return d;
 }
 const done = (d) => { if (!process.env.KEEP_TMP) fs.rmSync(d, { recursive: true, force: true }); };
@@ -144,12 +142,12 @@ test('cra: CRA template tsconfig (moduleResolution "node") fails closed with Typ
   done(d);
 });
 
-test('cra: app code may import the public socket @acme/core-slots/X (ModuleScopePlugin allows the shims)', () => {
+test('cra: app code importing the socket @acme/core-slots/X directly fails loudly (CRA ModuleScopePlugin)', () => {
   const d = fresh();
   write(d, 'src/App.tsx', read(d, 'src/App.tsx')
     .replace("import { products } from './products';", "import { products } from './products';\nimport { PriceTag as Direct } from '@acme/core-slots/PriceTag';")
     .replace('<Button variant="primary">Sign in</Button>', '<Button variant="primary">Sign in</Button>\n          <Direct amount={1} />'));
-  assertRenders(d, build(d), { app: ['BRAND_BUTTON(dark)', 'SDK_DEFAULT_BUTTON(none)', 'BRAND_PRICE'], sdk: EXPECTED_RENDER.sdk });
+  assertFails(build(d), /You attempted to import [^\n]*\.stunt-double\/gen\/PriceTag\.jsx which falls outside of the project src\/ directory/);
   done(d);
 });
 
