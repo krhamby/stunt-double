@@ -10,7 +10,8 @@ Bun gives you four commands that touch your overrides, and they do not all run p
 | `bun build.ts` (`Bun.build()` in a script) | yes: `stuntDoubleBun()` | plugin `onResolve` | adapter: STA + type gate + audit |
 | `bun ./index.html` (dev server) | yes: bunfig `[serve.static] plugins` | plugin `onResolve` | adapter dev mode: poisoned shims + watcher |
 | `bun build` CLI | **no** (it cannot load plugins) | the `workspace:*` link | none: `stunt-double check &&` |
-| `bun test`, `bun run`, the Bun runtime | no (a runtime `Bun.plugin` `onResolve` never sees the SDK's bare specifiers [V]) | the link, or tsconfig `paths` | none: `stunt-double check &&` |
+| `bun test` with the `stunt-double/bun-test` preload | runtime plugin (`onLoad`) | scoped rewrite of the SDK's socket specifiers | preload: STA + type gate (exit 1) |
+| `bun run`, the Bun runtime, `bun test` without the preload | no (a runtime `Bun.plugin` `onResolve` never sees the SDK's bare specifiers [V]) | the link, or tsconfig `paths` | none: `stunt-double check &&` |
 
 ## Setup
 
@@ -22,7 +23,7 @@ Bun gives you four commands that touch your overrides, and they do not all run p
     "postinstall": "stunt-double gen --no-fail",
     "dev": "bun ./index.html",
     "build": "bun build.ts",
-    "test": "stunt-double check && bun test"
+    "test": "bun test"
   },
   "dependencies": { "@acme/core": "…", "@acme/core-slots": "workspace:*" },
   "devDependencies": { "stunt-double": "…", "typescript": "7.0.2", "@types/bun": "1.4.2" }
@@ -38,10 +39,29 @@ await Bun.build({ entrypoints: ['./index.html'], outdir: './dist', target: 'brow
 ```
 
 ```toml
-# bunfig.toml — the dev server (`bun ./index.html`, Bun.serve HTML routes)
-[serve.static]
+# bunfig.toml
+[serve.static]                       # the dev server (`bun ./index.html`, Bun.serve HTML routes)
 plugins = ["stunt-double/bun"]
+
+[test]                               # bun test
+preload = ["stunt-double/bun-test"]
 ```
+
+### `bun test`: the `stunt-double/bun-test` preload
+
+The Bun runtime has no hook that sees the SDK's bare `@acme/core-slots/<Slot>` imports: a runtime `Bun.plugin`
+`onResolve` is never called for them [V]. Only `onLoad` fires, so the preload is a **scoped specifier rewrite for
+the test runtime only**: for files inside the installed SDK (and brand layer) packages, the exact
+`'@acme/core-slots/<Slot>'` strings of `import`, `export … from` and literal `import()` are replaced with the
+absolute shim path (parsed with oxc, string literals only). App code and every other package load untouched; an
+unknown slot is left alone and fails on the registry placeholder. Before any test file loads, the preload runs the
+generator and awaits the type gate; an injection error throws, and `bun test` exits 1 printing the `[Fx]` lines,
+with no test run [V]. Production bundles never use this rewrite: `Bun.build` resolves sockets through `onResolve`.
+
+Zero-code alternative: `bun test --tsconfig-override=<a tsconfig that extends yours and adds
+"paths": {"@acme/core-slots/*": [...shim dir...]}>`. It works, but Bun 1.4.2 prints a spurious
+`Internal error: directory mismatch for directory "…tsconfig….json", fd 3 … indicates a bug` line on every run,
+and it adds no validation (chain `stunt-double check &&`).
 
 ```jsonc
 // tsconfig.json (compilerOptions) — types follow the shims, and `bun test` also resolves through it
@@ -73,7 +93,7 @@ Bun 1.4.2 [V]: a throw or rejected promise in `setup`, `onStart` or `onEnd` reje
 `bun build.ts` = the adapter (T1). `bare` = the `bun build` CLI without `stunt-double check &&` (T0 bare), then
 running the bundle. Every cell was observed by `tests/bun.test.mjs`.
 
-| # | Mistake | `bun build.ts` | dev server | `stunt-double check` | `bun build` CLI, bare | `bun test`, bare |
+| # | Mistake | `bun build.ts` | dev server | `stunt-double check` / `bun test` + preload | `bun build` CLI, bare | `bun test`, no preload |
 |---|---|---|---|---|---|---|
 | F1a/b | props incompatible / ignored | exit 1 (type gate) | stderr only (not blocking) | exit 1 | **builds; renders** | **passes** |
 | F1c | memo / forwardRef / class (must pass) | exit 0 | ok | exit 0 | ok | ok |
@@ -89,21 +109,23 @@ running the bundle. Every cell was observed by `tests/bun.test.mjs`.
 | F6c | SDK left external (`packages: 'external'`, `external: ['@acme/*']`), target node or bun | exit 1 (`[F6] Bun.build leaves "@acme/core" external`, outputs removed) | — | n/a | builds; fails at boot (`STUNT-DOUBLE-NOT-WIRED` without a link) | n/a |
 | — | only the sockets external (`external: ['@acme/core-slots/*']`) | ok: the plugin's `onResolve` wins over `external` | — | n/a | n/a | n/a |
 | F6g | another plugin resolves the socket elsewhere | exit 1 (**audit only**) | — | n/a | n/a | n/a |
-| F6h | stale shims | regenerated at every `Bun.build` | regenerated live | regenerated | loud (previous shim imports a deleted file) | loud |
+| F6h | stale shims | regenerated at every `Bun.build` | regenerated live | regenerated (the preload too) | loud (previous shim imports a deleted file) | loud |
 | F7 | override renders its own slot | exit 1 | error page | exit 1 | **runtime: Node heap exhausted** | runtime `RangeError: Maximum call stack size exceeded` |
 | F8 | duplicate React | exit 1 | error page | exit 1 | **runtime `Invalid hook call`** | runtime `dispatcher.useContext` null |
 | F9b | client slot imports `server-only` | exit 1 | error page | exit 1 | runtime throw from `server-only` | runtime |
 | F9c | async override in a client slot | exit 1 (type gate) | stderr only | exit 1 | runtime "A component suspended…" | runtime |
 
-So: production builds go through `bun build.ts`; every script that uses the `bun build` CLI or `bun test` must be
-`stunt-double check && …` (`stunt-double doctor` flags a `bun build` script without it). CI runs `stunt-double check`.
+In the `check / bun test + preload` column both fail with the same `[Fx]` line (the preload runs the same
+generator and gate). So: production builds go through `bun build.ts`, `bun test` gets the preload, and every
+script that uses the `bun build` CLI (or `bun test` without the preload) must be `stunt-double check && …` (`stunt-double doctor` flags a `bun build` script without it). CI runs `stunt-double check`.
 
 ## Known gaps (Bun 1.4.2)
 
 - The `bun build` CLI cannot load plugins: no STA, no type gate, no audit. F5 is not a bundler error there: the
   bundle references an undeclared binding and crashes at render (R1).
-- `bun test` and the Bun runtime have no plugin hook that sees the SDK's bare `@acme/core-slots/*` imports; they rely
-  on the link or tsconfig `paths` (either one alone is enough [V]; with neither, `Cannot find module` — loud).
+- Plain `bun run` / the Bun runtime has no plugin hook that sees the SDK's bare `@acme/core-slots/*` imports; it
+  relies on the link or tsconfig `paths` (either alone is enough [V]; with neither, `Cannot find module` — loud).
+  `bun test` gets the preload's scoped rewrite (above).
 - Dev server: Bun runs `onStart` once and never `onEnd`, and does not call plugins back on file edits, so the plugin
   watches `src/overrides` itself. Type errors (F1, F9c) are printed to the dev server's stderr, never blocking. The
   error page is Bun's (HTTP 500 + overlay showing `Could not resolve "./STUNT-DOUBLE-ERROR -- [F3] …"`).

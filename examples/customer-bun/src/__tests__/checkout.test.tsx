@@ -2,9 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { renderToString } from 'react-dom/server';
 import { App } from '../App';
 
-// bun test runs WITHOUT a bundler plugin: the Bun runtime resolves '@acme/core-slots/*' from inside
-// node_modules/@acme/core through the "workspace:*" link (sdk-slots/ -> gen/*.jsx). `stunt-double check &&`
-// in the "test" script supplies validation (bun test has no STA / type gate of its own).
+// bunfig.toml preloads stunt-double/bun-test: it validates the overrides (STA + type gate; an injection error
+// fails `bun test` with the [Fx] lines) and points @acme/core's socket imports at the generated shims.
 describe('stunt doubles on set', () => {
   const html = renderToString(<App />);
   const section = (name: string) => html.split(`data-probe="${name}"`)[1]?.split('</section>')[0] ?? '';

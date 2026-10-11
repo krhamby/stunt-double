@@ -55,6 +55,10 @@ function project(name, mutate) {
   return dir;
 }
 
+function dropPreload(dir) {
+  const f = path.join(dir, 'bunfig.toml');
+  fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(/^\[test\][\s\S]*?(?=^\[|(?![\s\S]))/m, ''));
+}
 const sdCli = (dir) => path.join(dir, 'node_modules/stunt-double/bin/stunt-double.mjs');
 const cmd = {
   /** T1: `bun build.ts` (Bun.build + stuntDoubleBun()), browser + SSR bundles */
@@ -64,7 +68,10 @@ const cmd = {
   /** T0 bare: the `bun build` CLI (no plugins possible), SSR bundle for the probe */
   bare: (dir) => run(BUN, ['build', './src/entry-server.tsx', '--target', 'node', '--format', 'esm', '--outdir', 'dist-bare'], dir),
   /** `bun test`: Bun runtime, sockets resolve through the workspace link / tsconfig paths */
+  /** `bun test` with bunfig [test] preload = ["stunt-double/bun-test"] (STA + gate + scoped socket rewrite) */
   test: (dir) => run(BUN, ['test'], dir),
+  /** `bun test` with the preload line removed: the Bun runtime resolves sockets through the link / tsconfig paths */
+  testBare: (dir) => { dropPreload(dir); return run(BUN, ['test'], dir); },
   /** node-run of a built SSR bundle; a small heap + timeout turn an infinite render (F7) into a quick crash */
   probe: (dir, entry = 'dist-ssr/entry-server.js') => run(process.execPath, ['--max-old-space-size=128', 'probes/render.mjs', entry], dir, { timeout: 60_000 }),
 };
@@ -139,10 +146,44 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     fails(run(process.execPath, [sdCli(dir), 'doctor'], dir), /\[DOCTOR\] script "build:cli" runs an adapter-less bundler without the gate/);
   });
 
-  test('bun test (no plugin: the link) renders the overrides', () => {
+  test('bun test (bun-test preload) renders the overrides', () => {
     const r = cmd.test(project('positive-test'));
     passes(r);
     assert.match(r.out, /3 pass/, show(r));
+  });
+
+  test('bun test without the preload (the link) renders the overrides', () => {
+    const r = cmd.testBare(project('positive-test-bare'));
+    passes(r);
+    assert.match(r.out, /3 pass/, show(r));
+  });
+
+  test('bun-test preload alone wires bun test: no link, no tsconfig paths for the Bun runtime', () => {
+    const dir = project('preload-only', (d) => {
+      fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { force: true });
+      fs.rmSync(path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots'), { force: true });
+      const pkg = readJson(path.join(d, 'package.json'));
+      delete pkg.dependencies['@acme/core-slots'];
+      delete pkg.workspaces;
+      writeJson(path.join(d, 'package.json'), pkg);
+      // the Bun runtime reads tsconfig.json (no paths now); the type gate reads tsconfig.gate.json (paths)
+      const ts = fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8');
+      fs.writeFileSync(path.join(d, 'tsconfig.gate.json'), ts);
+      fs.writeFileSync(path.join(d, 'tsconfig.json'), ts.replace(/^\s*"paths".*$/m, ''));
+      writeJson(path.join(d, 'stunt-double.config.json'), { ...readJson(path.join(d, 'stunt-double.config.json')), tsconfig: 'tsconfig.gate.json' });
+    });
+    const r = cmd.test(dir);
+    passes(r);
+    assert.match(r.out, /3 pass/, show(r));
+    // without the preload line: fails CLOSED on the unresolvable socket, never the SDK default
+    fails(cmd.testBare(dir), /Cannot find module '@acme\/core-slots\/Button'/);
+  });
+
+  test('a throw in the bun-test preload fails bun test (exit 1) and prints the [Fx] text', () => {
+    const dir = project('preload-throw', (d) => fs.rmSync(path.join(d, 'src/overrides/Logo.tsx')));
+    const r = cmd.test(dir);
+    fails(r, /StuntDoubleError: stunt-double: 1 injection error \(@acme\/core@1\.0\.0\)\s+\[F3\] required slot "Logo" has no implementation/);
+    assert.match(r.out, / 0 pass/, 'no test ran');
   });
 
   test('`bun build` CLI (T0, no plugin): the link alone wires the bundle', () => {
@@ -168,8 +209,8 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     });
     passes(cmd.build(dir));
     assertRender(cmd.probe(dir), POSITIVE);
-    // ...while the Bun RUNTIME has nothing to resolve the socket with: loud, never the SDK default
-    fails(cmd.test(dir), /Cannot find module '@acme\/core-slots\/Button'/);
+    // ...while the Bun RUNTIME (no preload) has nothing to resolve the socket with: loud, never the SDK default
+    fails(cmd.testBare(dir), /Cannot find module '@acme\/core-slots\/Button'/);
   });
 
   // regression: Bun.build's `root` (output layout) is neither the project root nor the metafile base
@@ -209,6 +250,7 @@ await Bun.build({ entrypoints: ['./src/entry-server.tsx'], outdir: './dist-ssr',
       fs.rmSync(path.join(fs.realpathSync(path.join(d, 'node_modules/@acme/core')), '..', 'core-slots'), { force: true });
       fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { force: true });
       fs.writeFileSync(path.join(d, 'tsconfig.json'), fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8').replace(/^\s*"paths".*$/m, ''));
+      dropPreload(d); // only the hand-written runtime plugin below
       fs.writeFileSync(path.join(d, 'preload.ts'), `import { plugin } from 'bun';
 plugin({ name: 'rt', setup(b) { b.onResolve({ filter: /^@acme\\/core-slots\\// }, (a) => { console.log('RUNTIME-ONRESOLVE ' + a.path); return { path: ${JSON.stringify(path.join(d, 'sdk-slots/gen'))} + '/' + a.path.split('/').pop() + '.jsx' }; }); } });
 `);
@@ -216,6 +258,28 @@ plugin({ name: 'rt', setup(b) { b.onResolve({ filter: /^@acme\\/core-slots\\// }
     const r = run(BUN, ['test', '--preload', './preload.ts'], dir);
     fails(r, /Cannot find module '@acme\/core-slots\/Button'/);
     assert.doesNotMatch(r.out, /RUNTIME-ONRESOLVE/);
+  });
+});
+
+describe('bun-test preload: rewriteSockets', { skip: !selected('positive') }, () => {
+  test('rewrites only exact socket specifiers of known slots in module-request literals', async () => {
+    const { rewriteSockets: fn } = await import('../packages/stunt-double/src/adapters/bun-rewrite.mjs');
+    const src = `import { Button } from '@acme/core-slots/Button';
+export { PriceTag } from "@acme/core-slots/PriceTag";
+const L = () => import('@acme/core-slots/Logo');
+import { X } from '@acme/core-slots/Unknown';
+import '@acme/core-slots-extra/Button';
+const s = '@acme/core-slots/Button';
+`;
+    const out = fn('/sdk/dist/index.js', src, '@acme/core-slots', (slot) => `/gen/${slot}.jsx`, ['Button', 'PriceTag', 'Logo']);
+    assert.equal(out, `import { Button } from "/gen/Button.jsx";
+export { PriceTag } from "/gen/PriceTag.jsx";
+const L = () => import("/gen/Logo.jsx");
+import { X } from '@acme/core-slots/Unknown';
+import '@acme/core-slots-extra/Button';
+const s = '@acme/core-slots/Button';
+`);
+    assert.equal(fn('/sdk/dist/x.js', `import React from 'react';\n`, '@acme/core-slots', (s) => s, ['Button']), null);
   });
 });
 
@@ -289,7 +353,7 @@ describe('dev server: bun ./index.html', { skip: !selected('dev') }, () => {
 
 // ---------------------------------------------------------------------------------------------------------
 // Mutations. Cells: build = `bun build.ts` (T1), check = `stunt-double check`, bare = `bun build` CLI + run
-// of its bundle (T0 bare), test = `bun test` (no plugin). Each cell is a function (dir, result) => void.
+// of its bundle (T0 bare), test = `bun test` with the bun-test preload, testBare = `bun test` without it. Each cell is a function (dir, result) => void.
 const F = (re) => (r) => fails(r, re);
 const OK = (r) => passes(r);
 const write = (d, f, s) => { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), s); };
@@ -313,7 +377,7 @@ const devOk = (re, js = /BRAND_BUTTON/) => async (s) => {
 
 const MUTATIONS = [
   {
-    id: 'F1a', dev: devOk(/\[F1\] Logo/), what: 'override adds a required prop (props incompatible)',
+    id: 'F1a', test: F(/\[F1\] Logo/), dev: devOk(/\[F1\] Logo/), what: 'override adds a required prop (props incompatible)',
     apply: (d) => write(d, 'src/overrides/Logo.tsx', `import type { SlotProps } from '@acme/core/contracts';
 export function Logo({ size, tone }: SlotProps['Logo'] & { tone: 'loud' }) {
   return <svg data-sd="BRAND_LOGO" data-tone={tone} width={size} />;
@@ -321,10 +385,10 @@ export function Logo({ size, tone }: SlotProps['Logo'] & { tone: 'loud' }) {
 `),
     build: F(/\[F1\] Logo/), check: F(/\[F1\] Logo/),
     bare: bareRender({ sdk: { BRAND_LOGO: 1 } }), // R1: no bundler type-checks
-    test: OK,
+    testBare: OK,
   },
   {
-    id: 'F1b', dev: devOk(/\[F1\] Button.*ignores these SDK props/), what: 'override ignores contract props',
+    id: 'F1b', test: F(/\[F1\] Button.*ignores these SDK props/), dev: devOk(/\[F1\] Button.*ignores these SDK props/), what: 'override ignores contract props',
     apply: (d) => write(d, 'src/overrides/Button.tsx', `import type { ReactNode } from 'react';
 import { Button as Original } from '@acme/core/original/Button';
 import { useTheme } from '../theme';
@@ -333,10 +397,10 @@ export function Button({ children }: { children?: ReactNode }) {
 }
 `),
     build: F(/\[F1\] Button.*ignores these SDK props/), check: F(/\[F1\] Button.*ignores these SDK props/),
-    bare: bareRender(POSITIVE), test: OK, // R1: onClick / variant silently dropped
+    bare: bareRender(POSITIVE), testBare: OK, // R1: onClick / variant silently dropped
   },
   {
-    id: 'F1c', dev: devOk(), what: 'must NOT fail: forwardRef / class overrides',
+    id: 'F1c', test: OK, dev: devOk(), what: 'must NOT fail: forwardRef / class overrides',
     apply: (d) => write(d, 'src/overrides/Button.tsx', `import { Component, forwardRef } from 'react';
 import { Button as Original } from '@acme/core/original/Button';
 import type { SlotProps } from '@acme/core/contracts';
@@ -347,39 +411,39 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
   return <Frame><span data-sd="BRAND_BUTTON" data-ctx={theme}><Original {...props} ref={ref} /></span></Frame>;
 });
 `),
-    build: OK, check: OK, bare: bareRender(POSITIVE), test: OK,
+    build: OK, check: OK, bare: bareRender(POSITIVE), testBare: OK,
     render: POSITIVE,
   },
   {
-    id: 'F2a', dev: devErr(/\[F2\] src\/overrides\/Buton\.tsx/), what: 'typo: src/overrides/Buton.tsx',
+    id: 'F2a', test: F(/\[F2\] src\/overrides\/Buton\.tsx/), dev: devErr(/\[F2\] src\/overrides\/Buton\.tsx/), what: 'typo: src/overrides/Buton.tsx',
     apply: (d) => fs.renameSync(path.join(d, 'src/overrides/Button.tsx'), path.join(d, 'src/overrides/Buton.tsx')),
     build: F(/\[F2\] src\/overrides\/Buton\.tsx overrides unknown slot "Buton" \(did you mean "Button"\?\)/), check: F(/\[F2\]/),
     // R1, observed: the CLI/runtime use the PREVIOUS shim (installed gen/Button.jsx still imports Button.tsx,
     // which no longer exists) -> loud resolve error, not a silent default
-    bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/Button\.tsx"/), test: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/Button\.tsx'/),
+    bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/Button\.tsx"/), testBare: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/Button\.tsx'/),
   },
   {
-    id: 'F2b', dev: devErr(/RENAMED to "Price"/), what: 'SDK upgrade 1.0.0 -> 2.0.0: PriceTag renamed Price, new required Footer',
+    id: 'F2b', test: F(/RENAMED to "Price"/), dev: devErr(/RENAMED to "Price"/), what: 'SDK upgrade 1.0.0 -> 2.0.0: PriceTag renamed Price, new required Footer',
     apply: swapSdk('acme-core-2.0.0.tgz'),
     build: F(/\[F2\] src\/overrides\/PriceTag\.tsx: slot "PriceTag" was RENAMED to "Price"/), check: F(/RENAMED to "Price"/),
     // RES: the 2.0.0 SDK imports the new socket @acme/core-slots/Price, which the stale gen/ lacks
-    bare: F(/Could not resolve: "@acme\/core-slots\/Price"/), test: F(/Cannot find module '@acme\/core-slots\/Price'/),
+    bare: F(/Could not resolve: "@acme\/core-slots\/Price"/), testBare: F(/Cannot find module '@acme\/core-slots\/Price'/),
   },
   {
-    id: 'F3', dev: devErr(/\[F3\]/), what: 'required slot Logo not provided',
+    id: 'F3', test: F(/\[F3\] required slot "Logo"/), dev: devErr(/\[F3\]/), what: 'required slot Logo not provided',
     apply: (d) => fs.rmSync(path.join(d, 'src/overrides/Logo.tsx')),
     build: F(/\[F3\] required slot "Logo" has no implementation/), check: F(/\[F3\]/),
     // RES: the previous shim imports the deleted file (after a fresh `gen`, the Logo shim is missing): loud
-    bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/Logo\.tsx"/), test: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/Logo\.tsx'/),
+    bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/Logo\.tsx"/), testBare: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/Logo\.tsx'/),
   },
   {
-    id: 'F4', dev: devErr(/\[F4\]/), what: 'two claims: Button.tsx + Button/index.tsx',
+    id: 'F4', test: F(/\[F4\]/), dev: devErr(/\[F4\]/), what: 'two claims: Button.tsx + Button/index.tsx',
     apply: (d) => write(d, 'src/overrides/Button/index.tsx', `export { Button } from '../Button';\n`),
     build: F(/\[F4\] slot "Button" is claimed by 2 files/), check: F(/\[F4\]/),
-    bare: bareRender(POSITIVE), test: OK, // R1: the previous shim (Button.tsx) keeps rendering
+    bare: bareRender(POSITIVE), testBare: OK, // R1: the previous shim (Button.tsx) keeps rendering
   },
   {
-    id: 'F5', dev: devErr(/\[F5\]/), what: 'wrong export: default instead of named Button',
+    id: 'F5', test: F(/\[F5\]/), dev: devErr(/\[F5\]/), what: 'wrong export: default instead of named Button',
     apply: (d) => {
       const f = path.join(d, 'src/overrides/Button.tsx');
       fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('export function Button(', 'export default function Button('));
@@ -388,24 +452,24 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     // Bun bundler: a missing named export is NOT a build error; the bundle crashes at render time (R1)
     // Bun bundler: `bun build` exits 0 and emits a reference to an undeclared binding -> crash at render.
     // Bun runtime (bun test): a link-time SyntaxError. Both runtime-only (R1): chain `stunt-double check &&`.
-    bare: bareCrash(/ReferenceError: Button\d* is not defined/), test: F(/SyntaxError: export 'Button' not found in '\.\.\/\.\.\/src\/overrides\/Button\.tsx'/),
+    bare: bareCrash(/ReferenceError: Button\d* is not defined/), testBare: F(/SyntaxError: export 'Button' not found in '\.\.\/\.\.\/src\/overrides\/Button\.tsx'/),
   },
   {
-    id: 'F6a', dev: devErr(/\[F6\] node_modules\/.*Checkout\.js/), what: 'SDK file imports a slot default relatively (1.0.0-bad-relative)',
+    id: 'F6a', test: F(/\[F6\] node_modules\/.*Checkout\.js/), dev: devErr(/\[F6\] node_modules\/.*Checkout\.js/), what: 'SDK file imports a slot default relatively (1.0.0-bad-relative)',
     apply: swapSdk('acme-core-1.0.0-bad-relative.tgz'),
     build: F(/\[F6\] node_modules\/.*Checkout\.js imports the default of slot "Button" directly/), check: F(/\[F6\]/),
     // R2: silent SDK default inside Checkout
     bare: bareRender({ sdk: { 'BRAND_BUTTON(dark)': 2, 'SDK_DEFAULT_BUTTON(in-cart)': 3 } }),
-    test: F(/toHaveLength/), // only the example's own marker-count assertion notices
+    testBare: F(/toHaveLength/), // only the example's own marker-count assertion notices
   },
   {
-    id: 'F6b', dev: devErr(/registry placeholder/), what: 'unwired: the registry placeholder instead of the link',
+    id: 'F6b', test: F(/registry placeholder/), dev: devErr(/registry placeholder/), what: 'unwired: the registry placeholder instead of the link',
     apply: (d) => { const pkg = readJson(path.join(d, 'package.json')); delete pkg.workspaces; pkg.dependencies['@acme/core-slots'] = `file:${packs}/acme-core-slots-0.0.1.tgz`; writeJson(path.join(d, 'package.json'), pkg); bunInstall(d); write(d, 'tsconfig.json', fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8').replace(/^\s*"paths".*$/m, '')); },
     build: F(/\[F6\] @acme\/core resolves @acme\/core-slots to .*registry placeholder/), check: F(/registry placeholder/),
-    bare: F(/STUNT-DOUBLE-NOT-WIRED/), test: F(/STUNT-DOUBLE-NOT-WIRED/),
+    bare: F(/STUNT-DOUBLE-NOT-WIRED/), testBare: F(/STUNT-DOUBLE-NOT-WIRED/),
   },
   {
-    id: 'F6f', dev: devErr(/\(a copy/), what: 'link wired wrong: Bun "file:./sdk-slots" (a copy)',
+    id: 'F6f', test: F(/\(a copy/), dev: devErr(/\(a copy/), what: 'link wired wrong: Bun "file:./sdk-slots" (a copy)',
     apply: (d) => {
       const pkg = readJson(path.join(d, 'package.json'));
       delete pkg.workspaces;
@@ -416,17 +480,17 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     },
     build: F(/\[F6\] @acme\/core resolves @acme\/core-slots to node_modules\/@acme\/core-slots \(a copy/), check: F(/a copy/),
     // the copy holds a snapshot of gen/: correct today, stale after the next override change (R1)
-    bare: bareRender(POSITIVE), test: OK,
+    bare: bareRender(POSITIVE), testBare: OK,
   },
   {
-    id: 'F6g', dev: devErr(/\[F6\] src\/App\.tsx/), what: 'bypass: app code imports @acme/core/original/Button',
+    id: 'F6g', test: F(/\[F6\] src\/App\.tsx/), dev: devErr(/\[F6\] src\/App\.tsx/), what: 'bypass: app code imports @acme/core/original/Button',
     apply: (d) => {
       const f = path.join(d, 'src/App.tsx');
       fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace("import { Button, Checkout } from '@acme/core';", "import { Checkout } from '@acme/core';\nimport { Button } from '@acme/core/original/Button';"));
     },
     build: F(/\[F6\] src\/App\.tsx imports "@acme\/core\/original\/Button" outside src\/overrides/), check: F(/\[F6\] src\/App\.tsx/),
     // silent default at that call site (R1); only the example's own assertion notices
-    bare: bareRender({ app: ['SDK_DEFAULT_BUTTON(none)'] }), test: F(/expect\(received\)\.toContain/),
+    bare: bareRender({ app: ['SDK_DEFAULT_BUTTON(none)'] }), testBare: F(/expect\(received\)\.toContain/),
   },
   {
     id: 'F6g-audit', what: 'a user plugin resolves the socket elsewhere (caught only by the AUD audit)',
@@ -439,10 +503,10 @@ const hijack = { name: 'hijack', setup(b: any) { b.onResolve({ filter: /^@acme\\
       fails(r, /\[F6\] .*imports the SDK default of slot "Button".*directly|\[F6\] @acme\/core imports @acme\/core-slots\/Button but sdk-slots\/gen\/Button\.jsx is not in the bundle/);
       assert.ok(!fs.readdirSync(path.join(dir, 'dist')).some((f) => f.endsWith('.js')), 'the adapter removes the outputs of a failed audit');
     },
-    check: OK, bare: null, test: null, // only a build-script plugin can do this
+    check: OK, bare: null, testBare: null, // only a build-script plugin can do this
   },
   {
-    id: 'F7', dev: devErr(/\[F7\]/), what: 'override imports its own slot through the barrel',
+    id: 'F7', test: F(/\[F7\]/), dev: devErr(/\[F7\]/), what: 'override imports its own slot through the barrel',
     apply: (d) => write(d, 'src/overrides/PriceTag.tsx', `import { PriceTag as Base } from '@acme/core';
 import type { SlotProps } from '@acme/core/contracts';
 export function PriceTag(props: SlotProps['PriceTag']) {
@@ -451,17 +515,17 @@ export function PriceTag(props: SlotProps['PriceTag']) {
 `),
     build: F(/\[F7\]/), check: F(/\[F7\]/),
     // runtime infinite render (R1): Node runs out of heap, Bun (bun test) overflows the stack
-    bare: bareCrash(/heap out of memory|Maximum call stack/), test: F(/RangeError: Maximum call stack size exceeded/),
+    bare: bareCrash(/heap out of memory|Maximum call stack/), testBare: F(/RangeError: Maximum call stack size exceeded/),
   },
   {
-    id: 'F8', dev: devErr(/\[F8\]/), what: 'duplicate React: the SDK bundles its own copy (1.0.0-nested-react)',
+    id: 'F8', test: F(/\[F8\] "react"/), dev: devErr(/\[F8\]/), what: 'duplicate React: the SDK bundles its own copy (1.0.0-nested-react)',
     apply: swapSdk('acme-core-1.0.0-nested-react.tgz'),
     build: F(/\[F8\] "react"/), check: F(/\[F8\]/),
     // runtime: two Reacts in one bundle / process (R1)
-    bare: bareCrash(/Invalid hook call/), test: F(/dispatcher\.useContext/),
+    bare: bareCrash(/Invalid hook call/), testBare: F(/dispatcher\.useContext/),
   },
   {
-    id: 'F9b', dev: devErr(/\[F9\]/), what: 'client-slot override imports "server-only"',
+    id: 'F9b', test: F(/\[F9\]/), dev: devErr(/\[F9\]/), what: 'client-slot override imports "server-only"',
     apply: (d) => {
       // the real server-only@0.0.1 shape: throws unless resolved with the "react-server" condition
       write(d, 'node_modules/server-only/package.json', '{"name":"server-only","version":"0.0.1","main":"index.js","exports":{".":{"react-server":"./empty.js","default":"./index.js"}}}');
@@ -471,10 +535,10 @@ export function PriceTag(props: SlotProps['PriceTag']) {
       fs.writeFileSync(f, `import 'server-only';\n` + fs.readFileSync(f, 'utf8'));
     },
     build: F(/\[F9\] src\/overrides\/Logo\.tsx imports "server-only"/), check: F(/\[F9\]/),
-    bare: bareCrash(/cannot be imported from a Client Component/), test: F(/cannot be imported from a Client Component/),
+    bare: bareCrash(/cannot be imported from a Client Component/), testBare: F(/cannot be imported from a Client Component/),
   },
   {
-    id: 'F9c', dev: devOk(/\[F9\]/), what: 'async (server-shaped) override in a client slot',
+    id: 'F9c', test: F(/\[F9\]/), dev: devOk(/\[F9\]/), what: 'async (server-shaped) override in a client slot',
     apply: (d) => write(d, 'src/overrides/Logo.tsx', `import type { SlotProps } from '@acme/core/contracts';
 export async function Logo({ size = 32 }: SlotProps['Logo']) {
   await Promise.resolve();
@@ -482,16 +546,16 @@ export async function Logo({ size = 32 }: SlotProps['Logo']) {
 }
 `),
     build: F(/\[F9\]/), check: F(/\[F9\]/),
-    bare: bareCrash(/A component suspended while responding to synchronous input/), test: F(/A component suspended/),
+    bare: bareCrash(/A component suspended while responding to synchronous input/), testBare: F(/A component suspended/),
   },
   {
-    id: 'F6h', dev: devOk(null, /SDK_DEFAULT_PRICETAG/), what: 'stale shims: override removed without regenerating',
+    id: 'F6h', test: F(/Expected to not contain: "SDK_DEFAULT_PRICETAG"/), dev: devOk(null, /SDK_DEFAULT_PRICETAG/), what: 'stale shims: override removed without regenerating',
     apply: (d) => fs.rmSync(path.join(d, 'src/overrides/PriceTag.tsx')),
     // T1 regenerates at every Bun.build: the SDK default now renders, as declared
     build: (r, dir) => { passes(r); assertRender(cmd.probe(dir), { sdk: { SDK_DEFAULT_PRICETAG: 3, BRAND_PRICE: 0 } }); },
     check: OK,
     // the previous shim imports the deleted file: loud
-    bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/PriceTag\.tsx"/), test: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/PriceTag\.tsx'/),
+    bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/PriceTag\.tsx"/), testBare: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/PriceTag\.tsx'/),
   },
 ];
 
@@ -505,11 +569,11 @@ describe('mutations (Bun 1.4)', () => {
         const s = devServer(project(`m-${m.id}-dev`, m.apply));
         try { await m.dev(s); } finally { s.stop(); }
       });
-      for (const cell of ['build', 'check', 'bare', 'test']) {
+      for (const cell of ['build', 'check', 'bare', 'test', 'testBare']) {
         if (!m[cell]) continue;
         test(cell, () => {
           // `check` regenerates; run it on its own copy so it never "fixes" the stale cells
-          const d = cell === 'check' || cell === 'build' ? project(`m-${m.id}-${cell}`, m.apply) : dir;
+          const d = ['check', 'build', 'test'].includes(cell) ? project(`m-${m.id}-${cell}`, m.apply) : dir;
           m[cell](cmd[cell](d), d);
         });
       }
