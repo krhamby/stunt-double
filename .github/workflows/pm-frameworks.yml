@@ -1,0 +1,54 @@
+name: package managers, frameworks, universal tier
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pm-frameworks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-managers:
+    name: npm / pnpm / Yarn PnP / Bun x adapter / universal
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # pnpm 12.11.2 and Yarn 4.18.1 are installed by the suites themselves from the npm registry
+      # (tests/package-managers/project.mjs), so no corepack step is needed.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: npm ci
+      - run: npm run setup
+      - name: unit (type gate under Yarn PnP)
+        run: node --test packages/stunt-double/test/typegate-pnp.test.mjs
+      - name: package managers x tiers
+        run: node --test --test-reporter=spec tests/package-managers.test.mjs
+      - name: wiring self-test
+        run: node --test --test-reporter=spec tests/pm-wiring.test.mjs
+
+  typescript-and-universal:
+    name: TypeScript 7 / 5.9 matrix, unknown-tool universal tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run setup
+      - name: TypeScript matrix
+        run: node --test --test-reporter=spec tests/typescript-matrix.test.mjs
+      - name: unknown tool (Node ESM loader)
+        run: node --test --test-reporter=spec tests/universal-node.test.mjs
