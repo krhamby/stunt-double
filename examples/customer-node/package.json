@@ -1,0 +1,26 @@
+{
+  "name": "customer-node",
+  "private": true,
+  "version": "0.0.0",
+  "description": "stunt-double's universal tier with a tool that has NO adapter: plain Node ESM plus a tiny TS/JSX loader. Package resolution is Node's own; overrides arrive through the linked @acme/core-slots package.",
+  "type": "module",
+  "scripts": {
+    "postinstall": "stunt-double gen --no-fail",
+    "render": "stunt-double check && node --import ./tool/register.mjs tool/render.mjs",
+    "render:bare": "node --import ./tool/register.mjs tool/render.mjs",
+    "check": "stunt-double check"
+  },
+  "dependencies": {
+    "@acme/core": "file:../../.packs/acme-core-1.0.0.tgz",
+    "@acme/core-slots": "file:./sdk-slots",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "stunt-double": "file:../../.packs/stunt-double-0.1.0.tgz",
+    "sucrase": "3.35.1",
+    "typescript": "7.0.2"
+  }
+}
