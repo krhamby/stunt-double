@@ -32,7 +32,7 @@ const shared = (env, argv) => ({
 // withStuntDouble(): validates src/overrides at every start and rebuild, aliases each @acme/core-slots/<Slot>
 // to its generated shim, runs the contract type check and the bundle audit, and reports every injection
 // mistake through compilation.errors (non-zero exit in `webpack`, overlay in `webpack serve`).
-export default (env, argv) => [
+const client = (env, argv) =>
   withStuntDouble({
     ...shared(env, argv),
     name: 'client',
@@ -40,7 +40,9 @@ export default (env, argv) => [
     output: { path: path.join(root, 'dist'), clean: true },
     plugins: [new HtmlWebpackPlugin({ templateContent: '<!doctype html><html><body><div id="root"></div></body></html>' })],
     devServer: { port: Number(process.env.PORT ?? 8080), hot: true, client: { overlay: true } },
-  }),
+  });
+
+const ssr = (env, argv) =>
   withStuntDouble({
     ...shared(env, argv),
     name: 'ssr',
@@ -48,5 +50,7 @@ export default (env, argv) => [
     entry: './src/entry-server.tsx',
     experiments: { outputModule: true },
     output: { path: path.join(root, 'dist-ssr'), filename: 'entry-server.mjs', library: { type: 'module' }, clean: true },
-  }),
-];
+  });
+
+// The dev server serves the browser bundle only; builds also emit the SSR bundle the render probe imports.
+export default (env, argv) => (env?.WEBPACK_SERVE ? [client(env, argv)] : [client(env, argv), ssr(env, argv)]);
