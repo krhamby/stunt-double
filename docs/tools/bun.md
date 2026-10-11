@@ -1,7 +1,9 @@
 # stunt-double with Bun 1.4
 
 Verified with **Bun 1.4.2** (`@types/bun` 1.4.2), TypeScript 7.0.2, React 19.3.0, Node 22.22.0, on Linux x64.
-Example: [`examples/customer-bun`](../../examples/customer-bun). Suite: [`tests/bun.test.mjs`](../../tests/bun.test.mjs).
+Example: [`examples/customer-bun`](../../examples/customer-bun). Suite: [`tests/bun.test.mjs`](../../tests/bun.test.mjs)
+(`npm test -- bun`: the shared harness — positive, the whole mutation catalogue with `bun test` also refusing every
+mistake, the dev server, TypeScript 5.9, the universal tier — plus the Bun-specific per-command matrix below).
 
 ## Setup
 

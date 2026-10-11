@@ -18,6 +18,64 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseRenderOutput, summarize, compareRender } from './harness/markers.mjs';
+import { defineToolSuite } from './harness/index.mjs';
+
+// ---------------------------------------------------------------------------------------------------------
+// The shared harness suite (tests/README.md): the positive scenario, the whole mutation catalogue, a dev-server
+// probe, the TypeScript 5.9 type gate and the universal tier, all installed with `bun install`.
+const BUN_CLI_SSR = 'bun build ./src/entry-server.tsx --target node --format esm --outdir dist-ssr';
+const BUN_CLI_BUILD = `bun build ./index.html --outdir dist && ${BUN_CLI_SSR}`;
+
+defineToolSuite({
+  name: 'bun',
+  fixtureDir: 'examples/customer-bun',
+  pm: 'bun',
+  commands: {
+    build: 'bun build.ts', // Bun.build() + stuntDoubleBun(): browser (index.html) + SSR bundles
+    render: 'node probes/render.mjs',
+    test: 'bun test', // bunfig [test] preload = ["stunt-double/bun-test"]
+  },
+  outputs: ['dist', 'dist-ssr'],
+  positive: { bundle: { files: 'dist/*.js' }, alsoPass: ['check', 'test'] },
+  // the `bun build` CLI cannot load plugins: the same app built without stunt-double
+  unwired: { files: {}, command: 'bun build ./src/entry-server.tsx --target node --outdir dist-unwired' },
+  // every mistake the build refuses, `bun test` refuses too: the preload runs the same generator and type gate
+  expectations: (m) => (m.expect.outcome === 'fail' && m.expect.command === 'build' ? { also: [{ command: 'test' }] } : undefined),
+  devProbe: bunDevProbe,
+  typescript5: true,
+  universal: {
+    pm: 'bun', // "workspace:*" + "workspaces": ["sdk-slots"]
+    build: `stunt-double check && ${BUN_CLI_BUILD}`,
+    bare: BUN_CLI_BUILD,
+    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b'],
+  },
+});
+
+/** Dev server (`bun ./index.html`, bunfig [serve.static] plugins = ["stunt-double/bun"]) in the harness app. */
+async function bunDevProbe(fx, t) {
+  const s = devServer(fx.app);
+  const js = async (re, what) => (await s.until(what, async () => { const p = await s.page(); return p.status === 200 && p.js.status === 200 && re.test(p.js.body) && p; })).js.body;
+  try {
+    const first = await js(/BRAND_LOGO/, 'the page');
+    assert.doesNotMatch(first, /SDK_DEFAULT_PRICETAG/);
+    // remove an override: the SDK default comes back without a restart; restore it: the override again
+    fx.remove(fx.override('PriceTag.tsx'));
+    await js(/SDK_DEFAULT_PRICETAG/, 'the SDK PriceTag after removing the override');
+    fx.restore(fx.override('PriceTag.tsx'));
+    assert.doesNotMatch(await js(/BRAND_PRICE/, 'the override after restoring it'), /SDK_DEFAULT_PRICETAG/);
+    // a mistake: Bun's error page (HTTP 500) with the [F3] line; fixing it clears it
+    fx.remove(fx.override('Logo.tsx'));
+    await s.until('HTTP 500', async () => (await s.page()).status === 500);
+    await s.until('[F3] on the dev server output', () => /\[F3\] required slot "Logo"/.test(s.log) && /STUNT-DOUBLE-ERROR -- \[F3\]/.test(s.log));
+    fx.restore(fx.override('Logo.tsx'));
+    await js(/BRAND_LOGO/, 'the fixed page');
+    t.diagnostic('bun dev server: override add/remove live; [F3] error page cleared on fix');
+  } finally { s.stop(); }
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Bun-specific checks beyond the harness: observed behaviour per command for every mistake (including the
+// commands that run no stunt-double code), the bun-test preload, external rules, the dev server, doctor.
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packs = path.join(repo, '.packs');
