@@ -2,6 +2,7 @@
 import { Button } from '@acme/core-slots/Button';
 import { Logo } from '@acme/core-slots/Logo'; // required slot: @acme/core ships no default
 import { PriceTag } from '@acme/core-slots/PriceTag';
+import { formatPrice } from '@acme/core-slots/formatPrice'; // a value slot: the project's formatter, if any
 import { CartProvider, useCart, type CartItem } from './cart-context.js';
 import { ProductCard } from './ProductCard.js';
 
@@ -14,7 +15,9 @@ function Summary({ onPay }: { onPay?: () => void }) {
   const cart = useCart();
   return (
     <footer className="acme-summary">
-      <span>{cart.count} in cart</span>
+      <span className="acme-total" data-sd="SDK_TOTAL" data-ctx={formatPrice(cart.total)}>
+        {cart.count} in cart
+      </span>
       <PriceTag amount={cart.total} />
       <Button onClick={onPay}>Pay</Button>
     </footer>

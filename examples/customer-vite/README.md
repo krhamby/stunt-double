@@ -6,7 +6,9 @@ uses exactly the three-step setup:
 1. `npm i -D stunt-double` (here: the tarball from `npm run setup` at the repository root);
 2. one line in [vite.config.ts](vite.config.ts): `plugins: [react(), stuntDouble()]`;
 3. overrides in [src/overrides/](src/overrides): `Button` wraps the SDK default, `PriceTag` replaces it (a `memo()`
-   component), and `Logo` implements the slot the SDK requires.
+   component), and `Logo` implements the slot the SDK requires. Two are **value slots** rather than components:
+   `formatPrice` (a function the SDK calls to show money) and `analytics` (a service object the SDK reports
+   events to).
 
 There is no stunt-double config, no tsconfig edit, no `.gitignore` edit and no extra dependency line. Generated
 files go to `.stunt-double/`, which ignores itself.

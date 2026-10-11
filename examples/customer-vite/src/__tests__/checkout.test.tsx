@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToString } from 'react-dom/server';
+import { analytics, formatPrice } from '@acme/core';
 import { App } from '../App';
 
 // Vitest runs through vite.config.ts, so the stunt-double plugin wires the same shims as the build.
@@ -22,5 +23,11 @@ describe('stunt doubles on set', () => {
 
   it('the replaced PriceTag default never renders', () => {
     expect(html).not.toContain('SDK_DEFAULT_PRICETAG');
+  });
+
+  it('value slots: the SDK total uses the project formatPrice; app code gets the project services too', () => {
+    expect(section('sdk')).toContain('data-sd="SDK_TOTAL" data-ctx="USD 19.99"');
+    expect(formatPrice(9.5)).toBe('USD 9.50');
+    expect(analytics.id).toBe('BRAND_ANALYTICS');
   });
 });

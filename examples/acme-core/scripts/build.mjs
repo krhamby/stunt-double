@@ -66,9 +66,11 @@ function build(id) {
   const slots = slotsSpec.slots;
   // dev-slots: what '@acme/core-slots/*' means while type-checking the SDK itself (specifiers are NOT rewritten)
   for (const [name, meta] of Object.entries(slots)) {
-    const dts = meta.required
-      ? `import type { ReactNode } from 'react';\nimport type { SlotProps } from '../src/contracts.js';\nexport declare function ${name}(props: SlotProps['${name}']): ReactNode;\n`
-      : `export { ${name} } from '../src/original/${name}.js';\n`;
+    const dts = !meta.required
+      ? `export { ${name} } from '../src/original/${name}.js';\n`
+      : meta.kind === 'value' // a required value slot: typed by its whole contract
+        ? `import type { SlotTypes } from '../src/contracts.js';\nexport declare const ${name}: SlotTypes['${name}'];\n`
+        : `import type { ReactNode } from 'react';\nimport type { SlotProps } from '../src/contracts.js';\nexport declare function ${name}(props: SlotProps['${name}']): ReactNode;\n`;
     fs.mkdirSync(path.join(out, 'dev-slots'), { recursive: true });
     fs.writeFileSync(path.join(out, 'dev-slots', `${name}.d.ts`), dts);
   }

@@ -22,7 +22,7 @@ export default defineConfig({ plugins: [react()], ssr: { noExternal: ['@acme/cor
 const UNIVERSAL_BUILD = 'vite build --config vite.universal.config.ts && vite build --config vite.universal.config.ts --ssr src/entry-server.tsx --outDir dist-ssr';
 
 // Mistakes Vitest must also refuse at startup (the plugin validates when Vitest loads vite.config).
-const ALSO_VITEST = ['F2a', 'F3a', 'F4', 'F5a', 'F7b'];
+const ALSO_VITEST = ['F2a', 'F3a', 'F4', 'F5a', 'F7b', 'V2', 'V7'];
 
 defineToolSuite({
   name: 'vite',
@@ -53,6 +53,6 @@ defineToolSuite({
     files: { 'vite.universal.config.ts': UNIVERSAL_CONFIG },
     build: `stunt-double check && ${UNIVERSAL_BUILD}`,
     bare: UNIVERSAL_BUILD,
-    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b'],
+    mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b', 'V1c', 'V7'],
   },
 });

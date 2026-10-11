@@ -9,7 +9,9 @@ import { glob, tail } from './util.mjs';
 /**
  * The render every fixture app produces with its standard overrides (the "fixture contract", tests/README.md):
  * wrapped Button (BRAND_BUTTON reading the app theme "dark", wrapping the SDK default), replaced PriceTag
- * (BRAND_PRICE; the SDK default never renders), the required Logo, both app-level and inside SDK <Checkout>.
+ * (BRAND_PRICE; the SDK default never renders), the required Logo, both app-level and inside SDK <Checkout>,
+ * and the formatPrice VALUE slot: the SDK's checkout total (SDK_TOTAL) is formatted by the project ("USD 19.99";
+ * the SDK default would print "$19.99").
  */
 export const STANDARD_RENDER = Object.freeze({
   app: ['BRAND_BUTTON(dark)', 'SDK_DEFAULT_BUTTON(none)'],
@@ -19,13 +21,17 @@ export const STANDARD_RENDER = Object.freeze({
     SDK_DEFAULT_PRICETAG: 0,
     'BRAND_BUTTON(dark)': 3,
     'SDK_DEFAULT_BUTTON(in-cart)': 3,
+    'SDK_TOTAL(USD 19.99)': 1,
   },
 });
 
-/** The client bundle of the standard fixture: the replaced default is ABSENT, the wrapped original PRESENT. */
+/**
+ * The client bundle of the standard fixture: replaced defaults are ABSENT (the PriceTag component and the analytics
+ * VALUE slot's no-op service), the wrapped original PRESENT.
+ */
 export const STANDARD_BUNDLE = Object.freeze({
-  contains: ['BRAND_BUTTON', 'BRAND_PRICE', 'BRAND_LOGO', 'SDK_DEFAULT_BUTTON'],
-  absent: ['SDK_DEFAULT_PRICETAG'],
+  contains: ['BRAND_BUTTON', 'BRAND_PRICE', 'BRAND_LOGO', 'SDK_DEFAULT_BUTTON', 'BRAND_ANALYTICS'],
+  absent: ['SDK_DEFAULT_PRICETAG', 'SDK_DEFAULT_ANALYTICS'],
 });
 
 const describeRun = (r) => `\`${r.command}\` ${r.timedOut ? 'TIMED OUT' : `exited ${r.code ?? r.signal}`} after ${r.ms} ms`;

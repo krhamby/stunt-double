@@ -20,9 +20,10 @@ import f1 from './f1-contract.mjs';
 import naming from './f2-f5-naming.mjs';
 import f6 from './f6-not-applied.mjs';
 import f7f9 from './f7-f9.mjs';
+import values from './values.mjs';
 import viteFamily from './vite-family.mjs';
 
-export const catalogue = Object.freeze([...f1, ...naming, ...f6, ...f7f9, ...viteFamily]);
+export const catalogue = Object.freeze([...f1, ...naming, ...f6, ...f7f9, ...values, ...viteFamily]);
 
 const ids = new Set();
 for (const m of catalogue) {

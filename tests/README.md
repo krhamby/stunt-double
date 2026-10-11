@@ -46,7 +46,7 @@ Environment variables:
 | `STUNT_DOUBLE_REINSTALL=1` | ignore a cached install |
 | `STUNT_DOUBLE_CLEAN=1` | delete each suite's work dir when it finishes |
 
-The Vite suite (54 scenarios) takes about 70 seconds on 4 CPUs once its fixture is installed; the first run adds two `npm install`s (seconds with a warm npm cache). The core unit tests take about 1 second.
+The Vite suite (70 scenarios) takes about 70 seconds on 4 CPUs once its fixture is installed; the first run adds two `npm install`s (seconds with a warm npm cache). The core unit tests take about 1 second.
 
 ## How a suite runs
 
@@ -80,7 +80,7 @@ Every `examples/customer-<tool>/` app is the same "project that injects its own 
 | Requirement | customer-vite does it with |
 |---|---|
 | depends on `@acme/core` and `stunt-double` via `file:` specs into `../../.packs/`, and stands in for the registry's auto-installed placeholder peer with `"overrides": { "@acme/core-slots": "file:../../.packs/acme-core-slots-0.0.1.tgz" }` | `package.json`, `.npmrc` |
-| overrides in `src/overrides/`: **Button** wraps `@acme/core/original/Button` in `<span data-sd="BRAND_BUTTON" data-ctx={theme}>` where the app theme is `"dark"`; **PriceTag** replaces the default (`data-sd="BRAND_PRICE"`); **Logo** implements the required slot (`data-sd="BRAND_LOGO"`). Typed with `SlotProps['X']` | `src/overrides/*.tsx`, `src/theme.tsx` |
+| overrides in `src/overrides/`: **Button** wraps `@acme/core/original/Button` in `<span data-sd="BRAND_BUTTON" data-ctx={theme}>` where the app theme is `"dark"`; **PriceTag** replaces the default (`data-sd="BRAND_PRICE"`); **Logo** implements the required slot (`data-sd="BRAND_LOGO"`). Typed with `SlotProps['X']`. Two **value slots**: **formatPrice** returns `` `${currency} ${amount.toFixed(2)}` `` ("USD 19.99"), **analytics** is a service object whose `id` is `"BRAND_ANALYTICS"` | `src/overrides/*.tsx`, `src/overrides/*.ts`, `src/theme.tsx` |
 | renders `<section data-probe="app">` with one app-level `<Button>` from `@acme/core`, and `<section data-probe="sdk">` with `<Checkout products={2 products}>` | `src/App.tsx`, `src/products.ts` |
 | a **build** command that is the tool's real production build, plus whatever produces something the probe can render | `vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr` |
 | a **render** command that prints `STUNT-DOUBLE-RENDER <JSON string of the HTML>` (see `tests/harness/markers.mjs`) | `node probes/render.mjs` |
@@ -90,8 +90,11 @@ The standard render that results (`STANDARD_RENDER` in `tests/harness/expect.mjs
 
 ```
 app: BRAND_BUTTON(dark) > SDK_DEFAULT_BUTTON(none)
-sdk: BRAND_LOGO x1, BRAND_PRICE x3, BRAND_BUTTON(dark) x3, SDK_DEFAULT_BUTTON(in-cart) x3, SDK_DEFAULT_PRICETAG x0
+sdk: BRAND_LOGO x1, BRAND_PRICE x3, BRAND_BUTTON(dark) x3, SDK_DEFAULT_BUTTON(in-cart) x3, SDK_DEFAULT_PRICETAG x0,
+     SDK_TOTAL(USD 19.99) x1
 ```
+
+`SDK_TOTAL` is the SDK's own checkout total, formatted by whatever implements the `formatPrice` value slot: `USD 19.99` is the project's function called from inside the SDK (the SDK default would print `$19.99`). The standard bundle check (`STANDARD_BUNDLE`) also requires `BRAND_ANALYTICS` and forbids `SDK_DEFAULT_ANALYTICS`: the replaced analytics service is not shipped.
 
 The context values prove more than "something rendered": `dark` is the app's own React context seen from deep inside the SDK, `in-cart` is the SDK's context seen by the original the override wraps. A pre-bundled or duplicated module would break one of them.
 
@@ -125,6 +128,12 @@ Everything else (the tool's config, extra scripts, a different SSR or render str
 | F8 | duplicate React (1.0.0-nested-react) | build fails, `[F8] "react" … 2 copies` |
 | F9b | client-slot override imports `server-only` | build fails, `[F9]` |
 | F9c | async override in a client slot | build fails, `[F9] Logo … must not be an async component` |
+| V1a, V1d | value slot does not fit `SlotTypes`: formatPrice returns a number; analytics lacks `id` | build fails, `[F1] … does not fit the contract … SlotTypes['…']` |
+| V1b | value slot narrows a function parameter (`amount: 19.99 \| 9.5`) | build fails, `[F1] … narrows the parameters of the contract` |
+| V1c | service narrows a **method** parameter (`track(event: 'page_view')`), which plain TypeScript accepts | build fails, `[F1] analytics … narrows the parameters of these members: "track"` |
+| V1e, V-default | function with fewer parameters; no value overrides at all | **must pass**: `SDK_TOTAL(EUR 19.99)`; the SDK default `SDK_TOTAL($19.99)` |
+| V2, V5 | typo `fromatPrice.ts`; default export of `analytics` | build fails, `[F2] … did you mean "formatPrice"`; `[F5]` |
+| V7 | value override imports itself from the barrel | build fails, `[F7] … a circular import` |
 | F6c-ssr *(vite family)* | SSR environment externalizes the SDK | build fails, `[F6] … environment "ssr" externalizes` |
 | F6c-vitest *(vite family)* | Vitest `deps.optimizer` pre-bundles the SDK | `vitest run` fails, `[F6] Vitest deps.optimizer` |
 | F6g-alias *(vite family)* | a user alias aims the Button socket at the default | `safe`: inert (adapter alias wins) or `[F6]` from the audit |
