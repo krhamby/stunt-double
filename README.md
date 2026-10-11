@@ -124,9 +124,9 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 | esbuild 0.28 (JS API) | `stuntDoubleEsbuild()` from `stunt-double/esbuild` | **verified** ([page](docs/tools/esbuild.md)) |
 | webpack 5 | `withStuntDouble()` from `stunt-double/webpack` | **verified** ([page](docs/tools/webpack.md)) |
 | Rspack 2 | `withStuntDouble()` from `stunt-double/webpack` | **verified** ([page](docs/tools/webpack.md)) |
+| Rsbuild 2 | `withStuntDouble()` from `stunt-double/webpack` in `tools.rspack` | **verified** ([page](docs/tools/webpack.md)) |
 | Next.js 16 (Turbopack and `--webpack`; build and dev) | `withStuntDouble()` from `stunt-double/next` | **verified** ([page](docs/tools/next.md)) |
 | Jest 30 | `withStuntDouble()` from `stunt-double/jest` | **verified** ([page](docs/tools/jest.md)) |
-| Rsbuild 2 | `withStuntDouble()` from `stunt-double/webpack` in `tools.rspack` | **verified** ([page](docs/tools/webpack.md)) |
 | CRA 5 (craco), Gatsby | `withStuntDouble()` from `stunt-double/webpack` through their webpack hook | designed |
 | Storybook 10 (builder-vite) | the Vite plugin, from `vite.config.ts` | **verified** ([page](docs/tools/storybook.md)) |
 | Storybook 10 (webpack builder, `webpackFinal`) | `withStuntDouble()` from `stunt-double/webpack` | designed |
@@ -140,7 +140,7 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 
 Status key:
 
-- **verified** means a toolchain suite in `tests/` runs the whole shared mistake catalogue against a real app built with that tool (production build, SSR render, TypeScript 7 and 5.9, and the universal tier).
+- **verified** means a toolchain suite in `tests/` runs the whole shared mistake catalogue against a real app built with that tool: the production build, a render of the result (SSR, a prerendered page, or Chromium), TypeScript 7 and 5.9, and the universal tier.
 - **v0.1.0** means the adapter exists and shares the Vite plugin's code, without a suite of its own.
 - **designed** means the tool uses an existing adapter through its own config hook, as in [DESIGN.md §7](docs/DESIGN.md#7-per-tool-integration), not yet run in a suite.
 - **planned** means the adapter is designed but not written; importing it fails loudly, never silently.
