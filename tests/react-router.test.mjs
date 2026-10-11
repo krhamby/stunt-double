@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseRenderOutput, summarize, compareRender } from './harness/markers.mjs';
-import { REPO, ENV, MISTAKES, requirePacks, tmpRoot, installExample, copyApp, runBin, firstDiagnostic, grepFiles, freePort, devTypoScenario, cleanup } from './frameworks/lib.mjs';
+import { REPO, ENV, MISTAKES, requirePacks, tmpRoot, installExample, copyApp, runBin, firstDiagnostic, grepFiles, freePort, devTypoScenario, devLiveMistake, cleanup } from './frameworks/lib.mjs';
 
 const TMP = tmpRoot('react-router');
 const BASE = path.join(TMP, 'base');
@@ -117,4 +117,25 @@ describe('react-router dev', () => {
     assert.ok(o.fixedMarkers.includes('BRAND_PRICE') && o.fixedMarkers.includes('BRAND_LOGO') && !o.fixedMarkers.includes('SDK_DEFAULT_PRICETAG'));
     assert.match(o.log(), /stunt-double: injection errors fixed/);
   });
+
+  // Both fixed during this verification (see docs/tools/react-router.md): F1 used to be replayed from the type
+  // gate's startup memo (never reported in dev); F6g in a route file was never re-validated while running.
+  for (const [id, overlay, http] of [
+    ['F1', /\[F1\] Button \(app\/overrides\/Button\.tsx\): TS2322 Type 'ButtonProps' is not assignable to type 'ButtonProps & \{ tone: "loud"; \}'/, 200],
+    ['F6g', /\[F6\] app routes home\.tsx imports @acme core original Button outside app overrides|\[F6\] app\/routes\/home\.tsx imports "@acme\/core\/original\/Button" outside app\/overrides/, 500],
+  ]) {
+    test(`${id} made while running: overlay names it (page HTTP ${http}); undoing it clears the overlay`, async () => {
+      const a = app(`dev-${id}`);
+      const port = freePort();
+      const url = `http://localhost:${port}/`;
+      const o = await devLiveMistake(a, { args: [a.file(RR), 'dev', '--port', String(port), '--strictPort'], url, ctx: CTX, mistake: MISTAKES.find((m) => m.id === id) });
+      assert.ok(!o.start.timedOut, o.log());
+      assert.ok(!o.overlay.timedOut, `no overlay:\n${o.log()}`);
+      assert.match(o.overlay.text, overlay);
+      assert.equal(o.http.status, http);
+      assert.ok(!o.fixed.timedOut, o.log());
+      assert.equal(o.fixedOverlay, null);
+    });
+  }
 });
+

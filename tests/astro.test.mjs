@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseRenderOutput, summarize, compareRender, markers, section } from './harness/markers.mjs';
-import { REPO, ENV, MISTAKES, requirePacks, tmpRoot, installExample, copyApp, runBin, firstDiagnostic, grepFiles, freePort, devTypoScenario, cleanup } from './frameworks/lib.mjs';
+import { REPO, ENV, MISTAKES, requirePacks, tmpRoot, installExample, copyApp, runBin, firstDiagnostic, grepFiles, freePort, devTypoScenario, devLiveMistake, cleanup } from './frameworks/lib.mjs';
 
 const TMP = tmpRoot('astro');
 const BASE = path.join(TMP, 'base');
@@ -101,4 +101,25 @@ describe('astro dev', () => {
     assert.ok(o.fixedMarkers.includes('BRAND_PRICE') && o.fixedMarkers.includes('BRAND_LOGO') && !o.fixedMarkers.includes('SDK_DEFAULT_PRICETAG'));
     assert.match(o.log(), /stunt-double: injection errors fixed/);
   });
+
+  // Both fixed during this verification (see docs/tools/astro.md): F1 used to be replayed from the type gate's
+  // startup memo (never reported in dev); F6g in a component file was never re-validated while running.
+  for (const [id, overlay, http] of [
+    ['F1', /stunt-double: 1 injection error \(@acme\/core@1\.0\.0\) \[F1\] Button \(src\/overrides\/Button\.tsx\): TS2322 Type 'ButtonProps' is not assignable/, 200],
+    ['F6g', /Could not import \.\/STUNT-DOUBLE-ERROR -- \[F6\] src components App\.tsx imports @acme core original Button outside src overrides/, 500],
+  ]) {
+    test(`${id} made while running: overlay names it (page HTTP ${http}); undoing it clears the overlay`, async () => {
+      const a = app(`dev-${id}`);
+      const port = freePort();
+      const url = `http://localhost:${port}/`;
+      const o = await devLiveMistake(a, { args: [a.file(ASTRO), 'dev', '--port', String(port)], url, ctx: CTX, mistake: MISTAKES.find((m) => m.id === id) });
+      assert.ok(!o.start.timedOut, o.log());
+      assert.ok(!o.overlay.timedOut, `no overlay:\n${o.log()}`);
+      assert.match(o.overlay.text, overlay);
+      assert.equal(o.http.status, http);
+      assert.ok(!o.fixed.timedOut, o.log());
+      assert.equal(o.fixedOverlay, null);
+    });
+  }
 });
+

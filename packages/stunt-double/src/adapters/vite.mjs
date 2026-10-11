@@ -10,12 +10,13 @@
 //   buildStart      STA problems -> this.error (exit 1); TYP gate (memoized for client + SSR) -> this.error
 //   buildEnd        AUD: post-bundle graph audit -> this.error
 //   dev             regenerate on change, poisoned shims + overlay push, async type gate
+import fs from 'node:fs';
 import path from 'node:path';
 import { generate, regenerate, StuntDoubleError } from '../core/generate.mjs';
 import { runTypeGate } from '../core/typegate.mjs';
 import { auditGraph, rollupGraph } from '../core/audit.mjs';
 import { formatProblems, formatWarnings } from '../core/diagnostics.mjs';
-import { esc, cleanId } from '../core/util.mjs';
+import { esc, cleanId, isInside } from '../core/util.mjs';
 
 const PLUGIN = 'stunt-double';
 
@@ -143,7 +144,9 @@ export function stuntDouble(opts = {}) {
       try { s.ws?.on?.('connection', () => { if (lastError) setTimeout(() => { try { s.environments.client.hot.send({ type: 'error', err: { message: lastError, stack: '', plugin: PLUGIN } }); } catch {} }, 50); }); } catch {}
       const checkTypes = async () => {
         if (typecheck === false || p.problems.length) return;
-        const r = await runTypeGate(p);
+        // force: the gate memo is keyed by slot decisions + check file, which an edit INSIDE an override changes
+        // neither of; without it the startup result would be replayed and a new [F1] never reported in dev.
+        const r = await runTypeGate(p, { force: true });
         if (!r.ok) push(r.message);
         else clear();
       };
@@ -152,8 +155,16 @@ export function stuntDouble(opts = {}) {
       if (!p?.sdk) return;
       s.watcher.add([p.overridesDir, ...(p.configFile ? [p.configFile] : [])]);
       let t;
+      // F6g (a bypass import of '<sdk>/original/X' in app code) lives outside the overrides: re-validate when an
+      // edited source file mentions the original specifier, or while problems are outstanding (so fixes clear).
+      const bypassEdit = (file) => {
+        const f = path.resolve(p.root, String(file));
+        if (!/\.[cm]?[jt]sx?$/.test(f) || f.includes(`${path.sep}node_modules${path.sep}`) || !(p.cfg.sourceDirs ?? []).some((d) => isInside(f, path.resolve(p.root, d)))) return false;
+        if (p.problems.length) return true;
+        try { return fs.readFileSync(f, 'utf8').includes(p.sdk.originalSpecifier); } catch { return false; }
+      };
       const kick = (file) => {
-        if (!p.watches(file)) return;
+        if (!p.watches(file) && !bypassEdit(file)) return;
         clearTimeout(t);
         t = setTimeout(() => {
           try { p = regenerate(p, { onError: 'poison' }); } catch (e) { return push(String(e?.message ?? e)); }

@@ -259,3 +259,37 @@ export async function devTypoScenario(a, { args, ov, url }) {
     await dev.stop();
   }
 }
+
+/**
+ * Apply a catalogue mistake while the dev server runs (page open in Chromium), wait for the overlay to match
+ * `overlay`, then restore the files and wait for recovery. Returns observations.
+ */
+export async function devLiveMistake(a, { args, url, ctx, mistake }) {
+  const { chromium } = loadPlaywright();
+  const watched = [...filesUnder(a.file(ctx.ov)), a.file(ctx.page)];
+  const snap = new Map(watched.map((f) => [f, fs.readFileSync(f)]));
+  const dev = startProc(a.dir, process.execPath, args);
+  const browser = await chromium.launch();
+  const obs = { log: () => dev.log };
+  try {
+    obs.start = await until(url, (x) => x.status === 200 && x.text.includes('data-sd="BRAND_LOGO"'), 60_000);
+    if (obs.start.timedOut) return obs;
+    const page = await browser.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => document.querySelector('[data-sd="BRAND_LOGO"]'), null, { timeout: 30_000 });
+    mistake.apply(a, ctx);
+    obs.overlay = await waitOverlay(page, (t) => !!t && /\[F\d/.test(t));
+    obs.http = await get(url);
+    for (const f of filesUnder(a.file(ctx.ov))) if (!snap.has(f)) fs.rmSync(f);
+    for (const [f, buf] of snap) fs.writeFileSync(f, buf);
+    obs.fixed = await until(url, (x) => x.status === 200 && x.text.includes('data-sd="BRAND_LOGO"'), 30_000);
+    const page2 = await browser.newPage();
+    for (let i = 0; i < 3; i++) { try { await page2.goto(url); break; } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 500)); } }
+    await page2.waitForFunction(() => document.querySelector('[data-sd="BRAND_LOGO"]'), null, { timeout: 30_000 });
+    obs.fixedOverlay = await overlayText(page2);
+    return obs;
+  } finally {
+    await browser.close();
+    await dev.stop();
+  }
+}
