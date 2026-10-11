@@ -38,7 +38,8 @@ bundlerSuite({
     'F1a': { ...STA('[F1]'), bare: 'pass' },
     'F1a-narrow': { ...STA('[F1]'), bare: 'pass' },
     'F1b': { ...STA('[F1]'), bare: 'pass' },
-    'F1b-upgrade': { ...STA('[F1]'), bare: 'pass' },
+    // bare: nothing regenerates after the SDK upgrade (no adapter, no chain), and 1.1.0 adds a slot.
+    'F1b-upgrade': { ...STA('[F1]'), bare: 'pass', bareProbe: 'crash' }, // UNRESOLVED_IMPORT warning only (see F2b)
     'F1c': { t1: 'pass', chain: 'pass', bare: 'pass', render: F1C_RENDER },
     'F2a': { ...STA('[F2]'), bare: 'pass' },
     'F2a-stray': { ...STA('[F2]'), bare: 'pass' },

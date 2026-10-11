@@ -38,7 +38,8 @@ bundlerSuite({
     'F1a': { ...STA('[F1]'), bare: 'pass' },
     'F1a-narrow': { ...STA('[F1]'), bare: 'pass' },
     'F1b': { ...STA('[F1]'), bare: 'pass' },
-    'F1b-upgrade': { ...STA('[F1]'), bare: 'pass' },
+    // bare: nothing regenerates after the SDK upgrade (no adapter, no chain), and 1.1.0 adds a slot: loud.
+    'F1b-upgrade': { ...STA('[F1]'), bare: { fail: /Could not resolve "@acme\/core-slots\/Badge"/ } },
     'F1c': { t1: 'pass', chain: 'pass', bare: 'pass', render: F1C_RENDER },
     'F2a': { ...STA('[F2]'), bare: 'pass' },
     'F2a-stray': { ...STA('[F2]'), bare: 'pass' },
@@ -75,7 +76,7 @@ try {
         assert.notEqual(r.code, 0, ws.show(r));
         // printed by the plugin itself: esbuild 0.28 does not log onEnd errors
         assert.match(r.out, /\[F6\] node_modules\/@acme\/core\/dist\/Checkout\.js imports the SDK default of slot "PriceTag"/, ws.show(r));
-        assert.match(r.out, /\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but sdk-slots\/gen\/PriceTag\.jsx is not in the bundle/, ws.show(r));
+        assert.match(r.out, /\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but \.stunt-double\/gen\/PriceTag\.jsx is not in the bundle/, ws.show(r));
         assert.ok(!fs.existsSync(path.join(dir, 'dist-rogue')), 'a failed audit must not leave a bundle on disk');
       });
 

@@ -25,7 +25,7 @@ export default {
 };
 ```
 
-Plus the usual project wiring from `npx stunt-double init`: the `@acme/core-slots` link in `package.json`, `paths` and `files` in `tsconfig.json`, and `"postinstall": "stunt-double gen --no-fail"`.
+That is the whole setup: `npm i -D stunt-double`, this one plugin line, and your overrides in `src/overrides/<Slot>.tsx`. No tsconfig, `.gitignore` or `package.json` edits: generated files go to `.stunt-double/` (it ignores itself). `npx stunt-double init` only offers optional extras (editor squiggles, a CI script).
 
 - **Plugin order does not matter.** node-resolve 16 lets other plugins resolve first (`this.resolve(…, { skipSelf: true })`). Verified with `stuntDouble()` first, last, and with the `@acme/core-slots` link replaced by the registry placeholder.
 - The JSX/TS transform is yours to choose (rollup-plugin-esbuild, @rollup/plugin-swc, @rollup/plugin-babel). The generated shims are plain ESM in `.jsx` files and need no transform, but `nodeResolve` must list `.jsx`, `.tsx` and `.ts` in `extensions`.
@@ -37,7 +37,7 @@ What the plugin does in Rollup:
 | Hook | What it does |
 |---|---|
 | `options` | Validates `src/overrides` and writes the shims. |
-| `resolveId` | Maps `@acme/core-slots/<Slot>` to `sdk-slots/gen/<Slot>.jsx`. |
+| `resolveId` | Maps `@acme/core-slots/<Slot>` to `.stunt-double/gen/<Slot>.jsx`. |
 | `buildStart` | Validation errors and the contract type check fail the build (`this.error`). In watch mode it regenerates on every rebuild and watches the overrides directory and the config file. |
 | `buildEnd` | Audits the module graph: an SDK default reached around its slot, a socket resolved elsewhere, or a second copy of React or the SDK fails the build. |
 
@@ -47,9 +47,10 @@ Options: `typecheck: false`, `audit: false`, plus every option of `stunt-double.
 
 "Build" means `rollup -c` exits non-zero with the message shown. The IDs are explained in [DESIGN.md §2](../DESIGN.md#2-failure-catalogue-the-north-star).
 
-| Mistake | `stuntDouble()` | `stunt-double check && rollup` (no plugin) | bare Rollup, link only, no chain |
+| Mistake | `stuntDouble()` | universal tier: `stunt-double check && rollup` (no plugin) | Rollup without the plugin and without the chain (universal tier) |
 |---|---|---|---|
-| F1 props don't fit the contract (extra required prop, narrowed union, ignored props, SDK upgrade widened the contract); F9c async client override | build (type gate at `buildStart`) | `check` | **passes** |
+| F1 props don't fit the contract (extra required prop, narrowed union, ignored props); F9c async client override | build (type gate at `buildStart`) | `check` | **passes** |
+| F1 an SDK upgrade widened the contract of an own-props override (tested: 1.0.0 → 1.1.0) | build | `check` | build: `ENOENT Could not load …/gen/Badge.jsx` (1.1.0 adds a slot; nothing regenerated the shims) |
 | F1c `forwardRef`, `memo`, class overrides (must pass) | passes | passes | passes |
 | F2a typo'd or stray override file | build (`buildStart`) | `check` | passes (file unused) |
 | F2b slot renamed / new required slot in an SDK upgrade | build, with the rename hint | `check` | build: `ENOENT Could not load …/gen/Price.jsx` (no such shim) |
@@ -57,7 +58,7 @@ Options: `typecheck: false`, `audit: false`, plus every option of `stunt-double.
 | F4 two files claim a slot | build | `check` | passes |
 | F5 wrong export name | build | `check` | build: `MISSING_EXPORT` (native) |
 | F6a SDK imports a default directly (checked in the installed dist) | build | `check` | passes: the SDK default renders there (R2) |
-| F6b `@acme/core-slots` not linked (registry placeholder) | passes: the plugin is the wiring | build: `Could not resolve './STUNT-DOUBLE-NOT-WIRED …'` | build: same |
+| F6b no plugin and no universal-tier link: the registry placeholder answers the sockets | passes: the plugin is the wiring (the default setup) | build: `Could not resolve './STUNT-DOUBLE-NOT-WIRED …'` | build: same |
 | F6g app code imports `@acme/core/original/X` | build (import scan) | `check` | passes |
 | F6c a server build leaves the SDK or a socket external (array, regex or function, for example "every dependency") | build (`buildEnd`: `[F6] the bundle leaves "@acme/core" external`; nothing is written) | not checked: loud when Node starts (placeholder poison or `.jsx` shim) | same as the chain |
 | F6g a plugin resolves a socket before this one | build (`buildEnd` audit; nothing is written) | not checked | n/a |
@@ -69,7 +70,7 @@ Options: `typecheck: false`, `audit: false`, plus every option of `stunt-double.
 
 `rollup -c -w`: adding `Buton.tsx` fails the next rebuild with `[F2]`, deleting it passes again; breaking and fixing a contract does the same with `[F1]`.
 
-Without the plugin, use `"build": "stunt-double check && rollup -c"` and keep the `@acme/core-slots` link: the check covers every row above except the bundle audit.
+Without the plugin, use the universal tier: run `npx stunt-double init --universal` once (it adds the `@acme/core-slots` link to `sdk-slots/`), then `"build": "stunt-double check && rollup -c"`. The check covers every row above except the bundle audit; without the check, nothing regenerates the shims (see the last column).
 
 ## Known gaps
 

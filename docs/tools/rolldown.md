@@ -20,21 +20,22 @@ export default defineConfig({
 });
 ```
 
-Plus the usual project wiring from `npx stunt-double init`: the `@acme/core-slots` link in `package.json`, `paths` and `files` in `tsconfig.json`, and `"postinstall": "stunt-double gen --no-fail"`.
+That is the whole setup: `npm i -D stunt-double`, this one plugin line, and your overrides in `src/overrides/<Slot>.tsx`. No tsconfig, `.gitignore` or `package.json` edits: generated files go to `.stunt-double/` (it ignores itself). `npx stunt-double init` only offers optional extras (editor squiggles, a CI script).
 
 - Rolldown resolves, transforms TSX and handles CommonJS on its own: no other plugins are needed.
 - The SDK keeps its `"use client"` directives, so a client bundle logs `MODULE_LEVEL_DIRECTIVE` warnings. They are harmless; the example filters them with `onLog`.
 - An SSR bundle must bundle the SDK (`external` may list React, never `@acme/core`), otherwise Node loads the SDK natively and fails on the `.jsx` shims.
 
-The hooks are the same as in [Rollup](rollup.md#setup): `options` validates and writes the shims, `resolveId` maps `@acme/core-slots/<Slot>` to `sdk-slots/gen/<Slot>.jsx`, `buildStart` fails the build on validation and contract errors (and regenerates on every watch rebuild), and `buildEnd` audits the module graph. Options: `typecheck: false`, `audit: false`, plus every option of `stunt-double.config.json`.
+The hooks are the same as in [Rollup](rollup.md#setup): `options` validates and writes the shims, `resolveId` maps `@acme/core-slots/<Slot>` to `.stunt-double/gen/<Slot>.jsx`, `buildStart` fails the build on validation and contract errors (and regenerates on every watch rebuild), and `buildEnd` audits the module graph. Options: `typecheck: false`, `audit: false`, plus every option of `stunt-double.config.json`.
 
 ## Which mistakes fail where
 
 "Build" means `rolldown -c` exits non-zero with the message shown. The IDs are explained in [DESIGN.md §2](../DESIGN.md#2-failure-catalogue-the-north-star).
 
-| Mistake | `stuntDouble()` | `stunt-double check && rolldown` (no plugin) | bare Rolldown, link only, no chain |
+| Mistake | `stuntDouble()` | universal tier: `stunt-double check && rolldown` (no plugin) | Rolldown without the plugin and without the chain (universal tier) |
 |---|---|---|---|
-| F1 props don't fit the contract (extra required prop, narrowed union, ignored props, SDK upgrade widened the contract); F9c async client override | build (type gate at `buildStart`) | `check` | **passes** |
+| F1 props don't fit the contract (extra required prop, narrowed union, ignored props); F9c async client override | build (type gate at `buildStart`) | `check` | **passes** |
+| F1 an SDK upgrade widened the contract of an own-props override (tested: 1.0.0 → 1.1.0) | build | `check` | passes with an `UNRESOLVED_IMPORT` warning, fails when loaded (1.1.0 adds a slot; nothing regenerated the shims) |
 | F1c `forwardRef`, `memo`, class overrides (must pass) | passes | passes | passes |
 | F2a typo'd or stray override file | build (`buildStart`) | `check` | passes (file unused) |
 | F2b slot renamed / new required slot in an SDK upgrade | build, with the rename hint | `check` | passes with an `UNRESOLVED_IMPORT` **warning**; the bundle fails when loaded (see Known gaps) |
@@ -42,7 +43,7 @@ The hooks are the same as in [Rollup](rollup.md#setup): `options` validates and 
 | F4 two files claim a slot | build | `check` | passes |
 | F5 wrong export name | build | `check` | build: `MISSING_EXPORT` (native) |
 | F6a SDK imports a default directly (checked in the installed dist) | build | `check` | passes: the SDK default renders there (R2) |
-| F6b `@acme/core-slots` not linked (registry placeholder) | passes: the plugin is the wiring | build: `Could not resolve './STUNT-DOUBLE-NOT-WIRED …'` | build: same |
+| F6b no plugin and no universal-tier link: the registry placeholder answers the sockets | passes: the plugin is the wiring (the default setup) | build: `Could not resolve './STUNT-DOUBLE-NOT-WIRED …'` | build: same |
 | F6g app code imports `@acme/core/original/X` | build (import scan) | `check` | passes |
 | F6c a server build leaves the SDK or a socket external (array, regex or function, for example "every dependency") | build (`buildEnd`: `[F6] the bundle leaves … external`; nothing is written) | not checked: loud when Node starts (placeholder poison or `.jsx` shim) | same as the chain |
 | F6g a plugin resolves a socket before this one | build (`buildEnd` audit; nothing is written) | not checked | n/a |
@@ -54,7 +55,7 @@ The hooks are the same as in [Rollup](rollup.md#setup): `options` validates and 
 
 `rolldown -c -w`: adding `Buton.tsx` fails the next rebuild with `[F2]`, deleting it passes again; breaking and fixing a contract does the same with `[F1]`.
 
-Without the plugin, use `"build": "stunt-double check && rolldown -c"` and keep the `@acme/core-slots` link: the check covers every row above except the bundle audit.
+Without the plugin, use the universal tier: run `npx stunt-double init --universal` once (it adds the `@acme/core-slots` link to `sdk-slots/`), then `"build": "stunt-double check && rolldown -c"`. The check covers every row above except the bundle audit; without the check, nothing regenerates the shims (see the last column).
 
 ## Known gaps
 

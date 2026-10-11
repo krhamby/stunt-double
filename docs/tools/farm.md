@@ -18,7 +18,7 @@ export default defineConfig({
 });
 ```
 
-Plus the usual project wiring from `npx stunt-double init`: the `@acme/core-slots` link in `package.json`, `paths` and `files` in `tsconfig.json`, and `"postinstall": "stunt-double gen --no-fail"`. `farm start` with `@farmfe/plugin-react` also needs `react-refresh` installed.
+That is the whole setup: `npm i -D stunt-double`, this one plugin line, and your overrides in `src/overrides/<Slot>.tsx`. No tsconfig, `.gitignore` or `package.json` edits: generated files go to `.stunt-double/` (it ignores itself). `npx stunt-double init` only offers optional extras (editor squiggles, a CI script). `farm start` with `@farmfe/plugin-react` also needs `react-refresh` installed.
 
 For an SSR build, set `output.targetEnv: 'node'` and keep `@acme/core` bundled (`external` may list React, never the SDK); see `farm.config.ssr.ts` in the example.
 
@@ -26,9 +26,10 @@ For an SSR build, set `output.targetEnv: 'node'` and keep `@acme/core` bundled (
 
 "Build" means `farm build` exits non-zero with the message shown. The IDs are explained in [DESIGN.md §2](../DESIGN.md#2-failure-catalogue-the-north-star).
 
-| Mistake | `farm build` with `stuntDouble()` | `stunt-double check && farm build` (no plugin) | bare Farm, link only, no chain |
+| Mistake | `farm build` with `stuntDouble()` | universal tier: `stunt-double check && farm build` (no plugin) | Farm without the plugin and without the chain (universal tier) |
 |---|---|---|---|
 | F1 props don't fit the contract; F9c async client override | build (type gate at `buildStart`) | `check` | **passes** |
+| F1 an SDK upgrade widened the contract of an own-props override (tested: 1.0.0 → 1.1.0) | build | `check` | build: ``Can not resolve `@acme/core-slots/Badge` `` (1.1.0 adds a slot; nothing regenerated the shims) |
 | F1c `forwardRef`, `memo`, class overrides (must pass) | passes | passes | passes |
 | F2a typo'd or stray override file | build | `check` | passes (file unused) |
 | F2b slot renamed / new required slot in an SDK upgrade | build, with the rename hint | `check` | build: ``Can not resolve `@acme/core-slots/Price` `` |
@@ -36,7 +37,7 @@ For an SSR build, set `output.targetEnv: 'node'` and keep `@acme/core` bundled (
 | F4 two files claim a slot | build | `check` | passes |
 | F5 wrong export name | build | `check` | **passes: fails only at runtime** (Farm does not check missing exports) |
 | F6a SDK imports a default directly | build | `check` | passes: the SDK default renders there (R2) |
-| F6b `@acme/core-slots` not linked (registry placeholder) | passes: the plugin is the wiring | build: `STUNT-DOUBLE-NOT-WIRED` | build: same |
+| F6b no plugin and no universal-tier link: the registry placeholder answers the sockets | passes: the plugin is the wiring (the default setup) | build: `STUNT-DOUBLE-NOT-WIRED` | build: same |
 | F6g app code imports `@acme/core/original/X` | build (import scan) | `check` | passes |
 | F6g a plugin resolves a socket elsewhere | **not checked under Farm** (no audit) | not checked | n/a |
 | F6h override deleted without regenerating | regenerated: the SDK default renders, correctly | regenerated | build: resolve error (old shim) |

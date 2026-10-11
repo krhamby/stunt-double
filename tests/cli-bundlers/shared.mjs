@@ -47,13 +47,20 @@ w.on('event', (e) => {
 });
 `;
 
-/** Adapter-only project: no @acme/core-slots dependency line, the registry placeholder installed as the SDK's peer. */
+/**
+ * Adapter-only project (the default setup): no @acme/core-slots dependency, the registry placeholder answers the
+ * SDK's peer (supplied by the fixture's npm `overrides`, standing in for the registry). A no-op on the default
+ * project; on a universal-tier copy it removes the link again.
+ */
 export function placeholderOnly(d, ws) {
-  const pkg = readJson(path.join(d, 'package.json'));
+  const file = path.join(d, 'package.json');
+  const pkg = readJson(file);
+  if (!pkg.dependencies['@acme/core-slots'] && pkg.overrides?.['@acme/core-slots']) return;
   delete pkg.dependencies['@acme/core-slots'];
-  writeJson(path.join(d, 'package.json'), pkg);
+  pkg.overrides = { ...pkg.overrides, '@acme/core-slots': `file:${packs}/acme-core-slots-0.0.1.tgz` };
+  writeJson(file, pkg);
   fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
-  ws.npm(d, 'install', '--no-save', `${packs}/acme-core-slots-0.0.1.tgz`);
+  ws.npm(d, 'install');
 }
 
 /** The [F6] line of the external-SDK guard (esbuild: "esbuild leaves", Rollup/Rolldown: "the bundle leaves"). */

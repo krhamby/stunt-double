@@ -41,22 +41,43 @@ export function workspace(exampleName) {
     install() {
       for (const t of ['acme-core-1.0.0.tgz', 'acme-core-slots-0.0.1.tgz', 'stunt-double-0.1.0.tgz'])
         assert.ok(fs.existsSync(path.join(packs, t)), `missing .packs/${t}: run \`npm run setup\` first`);
-      fs.cpSync(example, base, { recursive: true, filter: (src) => !/[\\/](node_modules|dist|dist-ssr|gen)$/.test(src) && !src.endsWith('stunt-double.check.ts') });
+      fs.cpSync(example, base, { recursive: true, filter: (src) => !/[\\/](node_modules|dist|dist-ssr|\.stunt-double|sdk-slots)$/.test(src) });
       const f = path.join(base, 'package.json');
       writeJson(f, JSON.parse(fs.readFileSync(f, 'utf8').replaceAll('file:../../.packs/', `file:${packs}/`)));
       const r = run('npm', ['install', '--package-lock=false', '--no-audit', '--no-fund'], base, { timeout: 600_000 });
       assert.equal(r.code, 0, ws.show(r));
       return r;
     },
+    /**
+     * The universal tier (DESIGN §7.8) for tools without the adapter: `stunt-double init --universal` (the
+     * sdk-slots/ link package) + install + gen. The fixture's npm `overrides` entry for the registry placeholder
+     * is removed first: npm refuses an override that conflicts with the link dependency (EOVERRIDE), and the link
+     * is what satisfies the SDK's peer here.
+     */
+    installUniversal() {
+      const u = ws.project('base-universal');
+      const pkg = readJson(path.join(u, 'package.json'));
+      delete pkg.overrides;
+      writeJson(path.join(u, 'package.json'), pkg);
+      const cli = path.join(u, 'node_modules/stunt-double/bin/stunt-double.mjs');
+      for (const args of [[cli, 'init', '--universal'], null, [cli, 'gen']]) {
+        const r = args ? run(process.execPath, args, u) : run('npm', ['install', '--package-lock=false', '--no-audit', '--no-fund'], u, { timeout: 600_000 });
+        assert.equal(r.code, 0, ws.show(r));
+      }
+      assert.ok(fs.lstatSync(path.join(u, 'node_modules/@acme/core-slots')).isSymbolicLink(), 'init --universal did not link @acme/core-slots');
+      ws.universalBase = u;
+    },
     /** A copy of the installed base, optionally mutated. */
-    project(name, mutate) {
+    project(name, mutate, { universal = false } = {}) {
+      const from = universal ? ws.universalBase : base;
+      assert.ok(from, 'installUniversal() first');
       const dir = path.join(work, name);
       // Everything is copied except node_modules, which is HARDLINKED (cp -al): npm replaces files instead of
-      // writing them in place, and the generator writes only under sdk-slots/ and src/. Tool caches inside
+      // writing them in place, and the generator writes only under .stunt-double/, sdk-slots/ and src/. Tool caches inside
       // node_modules are dropped so no case can see another case's cache.
       fs.mkdirSync(dir);
-      for (const e of fs.readdirSync(base)) {
-        const r = run('cp', [e === 'node_modules' ? '-al' : '-a', path.join(base, e), path.join(dir, e)], work);
+      for (const e of fs.readdirSync(from)) {
+        const r = run('cp', [e === 'node_modules' ? '-al' : '-a', path.join(from, e), path.join(dir, e)], work);
         assert.equal(r.code, 0, ws.show(r));
       }
       for (const c of ['.farm', '.cache', '.vite', '.tmp']) fs.rmSync(path.join(dir, 'node_modules', c), { recursive: true, force: true });
