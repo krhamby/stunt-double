@@ -10,7 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bundlerSuite } from './cli-bundlers/suite.mjs';
 import { run, write, codesIn, packs } from './cli-bundlers/lib.mjs';
-import { STA, DEFAULT_PRICE, F1C_RENDER } from './cli-bundlers/shared.mjs';
+import { STA, DEFAULT_PRICE, F1C_RENDER, placeholderOnly, EXTERNAL_F6 } from './cli-bundlers/shared.mjs';
+import { probe, assertRender } from './cli-bundlers/lib.mjs';
 
 const node = (dir, ...args) => run(process.execPath, args, dir);
 
@@ -89,6 +90,34 @@ console.log(r.outputFiles[0].text.includes('SDK_DEFAULT_PRICETAG') ? 'DEFAULT' :
         const r = node(dir, 'alias.mjs');
         assert.equal(r.code, 0, ws.show(r));
         assert.match(r.out, /OVERRIDE/);
+      });
+
+      // Server builds that externalize packages, in an adapter-only project (no link: the placeholder is installed).
+      const serverBuild = (external) => `import * as esbuild from 'esbuild';
+import { stuntDoubleEsbuild } from 'stunt-double/esbuild';
+try {
+  await esbuild.build({ bundle: true, jsx: 'automatic', entryPoints: ['src/entry-server.tsx'], outdir: 'dist-ssr', platform: 'node', format: 'esm',
+    ${external}, plugins: [stuntDoubleEsbuild()] });
+} catch { process.exit(1); }
+`;
+      test("node build with packages: 'external' fails with [F6] (the SDK would load natively), and writes nothing", () => {
+        const dir = ws.project('ext-packages', (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', serverBuild("packages: 'external'")); });
+        const r = node(dir, 'server.mjs');
+        assert.notEqual(r.code, 0, ws.show(r));
+        assert.match(r.out, EXTERNAL_F6('"@acme/core"'), ws.show(r));
+        assert.ok(!fs.existsSync(path.join(dir, 'dist-ssr')), 'nothing may be written');
+      });
+      test("node build with external: ['@acme/*'] fails with [F6]", () => {
+        const dir = ws.project('ext-scope', (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', serverBuild("external: ['react', 'react-dom', 'react/*', 'react-dom/*', '@acme/*']")); });
+        const r = node(dir, 'server.mjs');
+        assert.notEqual(r.code, 0, ws.show(r));
+        assert.match(r.out, EXTERNAL_F6('"@acme/core"'), ws.show(r));
+      });
+      test("node build with the SOCKETS external ('@acme/core-slots/*'): the plugin's onResolve wins and the overrides render", () => {
+        const dir = ws.project('ext-socket', (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', serverBuild("external: ['react', 'react-dom', 'react/*', 'react-dom/*', '@acme/core-slots/*']")); });
+        const r = node(dir, 'server.mjs');
+        assert.equal(r.code, 0, ws.show(r));
+        assertRender(ws, probe(dir));
       });
 
       test('context.rebuild(): every rebuild regenerates and re-runs the type gate', () => {

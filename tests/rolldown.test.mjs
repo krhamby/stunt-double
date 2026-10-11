@@ -9,16 +9,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { bundlerSuite } from './cli-bundlers/suite.mjs';
-import { run, write } from './cli-bundlers/lib.mjs';
-import { STA, DEFAULT_PRICE, F1C_RENDER, watchScript, WATCH_STEPS, chainOf } from './cli-bundlers/shared.mjs';
+import { run, write, probe, assertRender } from './cli-bundlers/lib.mjs';
+import { STA, DEFAULT_PRICE, F1C_RENDER, watchScript, WATCH_STEPS, chainOf, placeholderOnly, EXTERNAL_F6 } from './cli-bundlers/shared.mjs';
 
 const node = (dir, ...args) => run(process.execPath, args, dir);
 
 /** SSR build through the Rolldown API. Prints ERR <message> on failure. */
-const script = (plugins, imports = '') => `import { rolldown } from 'rolldown';
+const script = (plugins, imports = '', external = '[/^react(-dom)?(\\/|$)/]') => `import { rolldown } from 'rolldown';
 ${imports}
 try {
-  const b = await rolldown({ input: 'src/entry-server.tsx', platform: 'node', external: [/^react(-dom)?(\\/|$)/], transform: { jsx: 'react-jsx' }, onLog() {}, plugins: ${plugins} });
+  const b = await rolldown({ input: 'src/entry-server.tsx', platform: 'node', external: ${external}, transform: { jsx: 'react-jsx' }, onLog() {}, plugins: ${plugins} });
   await b.write({ dir: process.argv[2] ?? 'dist-bare', format: 'es' });
 } catch (e) { console.error('ERR', e.message); process.exit(1); }
 `;
@@ -63,6 +63,26 @@ bundlerSuite({
   },
   extra: ({ ws }) => {
     describe('Rolldown specifics', () => {
+      // Server builds with "externalize the dependencies" rules, in an adapter-only project (placeholder, no link).
+      for (const [what, external, shown] of [
+        ['a function externalizing every package.json dependency', "(id) => ['react', 'react-dom', '@acme/core', '@acme/core-slots'].some((d) => id === d || id.startsWith(d + '/'))", EXTERNAL_F6('"@acme/core"')],
+        // Rolldown matches the RESOLVED id here, so the message names the file
+        ['[/node_modules/]', '[/node_modules/]', EXTERNAL_F6('"node_modules/@acme/core/dist/index.js"')],
+        ['a regex on the sockets', '[/^react(-dom)?(\\/|$)/, /^@acme\\/core-slots\\//]', /\[F6\] the bundle leaves "@acme\/core-slots\/(Button|Logo|PriceTag)"/],
+      ]) test(`node build with external = ${what} fails with [F6] (the SDK / sockets would load natively)`, () => {
+        const dir = ws.project(`ext-${what.replace(/\W+/g, '-').replace('node_modules', 'nm')}`, (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', script('[stuntDouble()]', "import { stuntDouble } from 'stunt-double/rolldown';", external)); });
+        const r = node(dir, 'server.mjs', 'dist-ssr');
+        assert.notEqual(r.code, 0, ws.show(r));
+        assert.match(r.out, shown, ws.show(r));
+        assert.ok(!fs.existsSync(path.join(dir, 'dist-ssr')), 'nothing may be written');
+      });
+      test('node build that keeps only React external renders the overrides (adapter-only project)', () => {
+        const dir = ws.project('ext-react-only', (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', script('[stuntDouble()]', "import { stuntDouble } from 'stunt-double/rolldown';")); });
+        const r = node(dir, 'server.mjs', 'dist-ssr');
+        assert.equal(r.code, 0, ws.show(r));
+        assertRender(ws, probe(dir));
+      });
+
       test('audit: a plugin that resolves a socket elsewhere fails the build at buildEnd', () => {
         const dir = ws.project('audit', (d) => write(d, 'rogue.mjs', script(
           '[{ name: "rogue", resolveId(s, imp) { if (s === "@acme/core-slots/PriceTag") return this.resolve("@acme/core/original/PriceTag", imp, { skipSelf: true }); } }, stuntDouble()]',

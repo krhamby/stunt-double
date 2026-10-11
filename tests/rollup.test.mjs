@@ -9,20 +9,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { bundlerSuite } from './cli-bundlers/suite.mjs';
-import { run, write, packs, readJson, writeJson, probe, assertRender } from './cli-bundlers/lib.mjs';
-import { STA, DEFAULT_PRICE, F1C_RENDER, watchScript, WATCH_STEPS, chainOf } from './cli-bundlers/shared.mjs';
+import { run, write, probe, assertRender } from './cli-bundlers/lib.mjs';
+import { STA, DEFAULT_PRICE, F1C_RENDER, watchScript, WATCH_STEPS, chainOf, placeholderOnly, EXTERNAL_F6 } from './cli-bundlers/shared.mjs';
 
 const node = (dir, ...args) => run(process.execPath, args, dir);
 
 /** SSR build through the Rollup API; PLUGINS is spliced in. Prints ERR <code> on failure. */
-const script = (plugins, imports = '') => `import { rollup } from 'rollup';
+const script = (plugins, imports = '', external = '[/^react(-dom)?(\\/|$)/]') => `import { rollup } from 'rollup';
 import { nodeResolve } from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import esbuild from 'rollup-plugin-esbuild';
 ${imports}
 const resolve = nodeResolve({ extensions: ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json'] });
 try {
-  const b = await rollup({ input: 'src/entry-server.tsx', external: [/^react(-dom)?(\\/|$)/], onwarn() {}, plugins: ${plugins} });
+  const b = await rollup({ input: 'src/entry-server.tsx', external: ${external}, onwarn() {}, plugins: ${plugins} });
   await b.write({ dir: process.argv[2] ?? 'dist-bare', format: 'es' });
 } catch (e) { console.error('ERR', e.code ?? '', e.message); process.exit(1); }
 `;
@@ -69,14 +69,29 @@ bundlerSuite({
     describe('Rollup specifics', () => {
       test('plugin order is harmless: stuntDouble() after node-resolve, with no link (placeholder installed)', () => {
         const dir = ws.project('order', (d, w) => {
-          const pkg = readJson(path.join(d, 'package.json'));
-          delete pkg.dependencies['@acme/core-slots'];
-          writeJson(path.join(d, 'package.json'), pkg);
-          fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
-          w.npm(d, 'install', '--no-save', `${packs}/acme-core-slots-0.0.1.tgz`);
+          placeholderOnly(d, w);
           write(d, 'last.mjs', script('[resolve, commonjs(), esbuild({ jsx: "automatic" }), stuntDouble()]', "import { stuntDouble } from 'stunt-double/rollup';"));
         });
         const r = node(dir, 'last.mjs', 'dist-ssr');
+        assert.equal(r.code, 0, ws.show(r));
+        assertRender(ws, probe(dir));
+      });
+
+      // Server builds with "externalize the dependencies" rules, in an adapter-only project (placeholder, no link).
+      for (const [what, external, shown] of [
+        ['a function externalizing every package.json dependency', "(id) => ['react', 'react-dom', '@acme/core', '@acme/core-slots'].some((d) => id === d || id.startsWith(d + '/'))", EXTERNAL_F6('"@acme/core"')],
+        ['[/node_modules/]', '[/node_modules/]', EXTERNAL_F6('"@acme/core"')],
+        ['a regex on the sockets', '[/^react(-dom)?(\\/|$)/, /^@acme\\/core-slots\\//]', /\[F6\] the bundle leaves "@acme\/core-slots\/(Button|Logo|PriceTag)"/],
+      ]) test(`node build with external = ${what} fails with [F6] (the SDK / sockets would load natively)`, () => {
+        const dir = ws.project(`ext-${what.replace(/\W+/g, '-').replace('node_modules', 'nm')}`, (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', script('[stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]', "import { stuntDouble } from 'stunt-double/rollup';", external)); });
+        const r = node(dir, 'server.mjs', 'dist-ssr');
+        assert.notEqual(r.code, 0, ws.show(r));
+        assert.match(r.out, shown, ws.show(r));
+        assert.ok(!fs.existsSync(path.join(dir, 'dist-ssr')), 'nothing may be written');
+      });
+      test('node build that keeps only React external renders the overrides (adapter-only project)', () => {
+        const dir = ws.project('ext-react-only', (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', script('[stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]', "import { stuntDouble } from 'stunt-double/rollup';")); });
+        const r = node(dir, 'server.mjs', 'dist-ssr');
         assert.equal(r.code, 0, ws.show(r));
         assertRender(ws, probe(dir));
       });

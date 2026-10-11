@@ -51,4 +51,5 @@ For an SSR build, set `output.targetEnv: 'node'` and keep `@acme/core` bundled (
 
 - **No post-bundle audit.** Farm's Vite-compatibility context has no `getModuleIds()`, so the plugin prints `stunt-double: post-bundle audit skipped, this host has no module-graph API` and continues. Validation (including the installed-dist scan for F6a and the install-level duplicate check for F8) and the contract type check still run.
 - Farm's config proxy throws on Vite config keys it does not support (for example `environments`); the plugin tolerates that, so the SSR-environment guard of the Vite adapter does not apply under Farm.
+- An SSR build that leaves `@acme/core` external is **not** detected under Farm (that check needs the module graph): keep the SDK out of `compilation.external`.
 - The browser overlay in `farm start` was not verified; errors are verified in the terminal.

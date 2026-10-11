@@ -73,7 +73,7 @@ export function stuntDoubleEsbuild(opts = {}) {
 
       build.onEnd((result) => {
         if (audit === false || result.errors.length) return;
-        const problems = p?.sdk && result.metafile ? auditGraph(p, esbuildGraph(result.metafile, cwd)) : [];
+        const problems = p?.sdk && result.metafile ? [...externalized(p, result.metafile), ...auditGraph(p, esbuildGraph(result.metafile, cwd))] : [];
         if (!problems.length) {
           if (holdWrite) for (const f of result.outputFiles ?? []) {
             fs.mkdirSync(path.dirname(f.path), { recursive: true });
@@ -92,6 +92,20 @@ export function stuntDoubleEsbuild(opts = {}) {
       });
     },
   };
+}
+
+/**
+ * [F6] The SDK (or a socket) left external, e.g. `packages: 'external'` or `external: ['@acme/*']` in a server
+ * build: Node would load the SDK natively, where no override can apply (it hits the registry placeholder or the
+ * .jsx shims at boot). Types-only `<sdk>/contracts` may stay external.
+ */
+function externalized(p, metafile) {
+  const { name, slotPackage } = p.sdk;
+  const hit = (spec) => spec === slotPackage || spec.startsWith(slotPackage + '/') || spec === name || (spec.startsWith(name + '/') && spec !== `${name}/contracts`);
+  const specs = new Set();
+  for (const info of Object.values(metafile.inputs ?? {})) for (const i of info.imports ?? []) if (i.external && hit(i.path)) specs.add(i.path);
+  if (!specs.size) return [];
+  return [`[F6] esbuild leaves ${[...specs].map((s) => `"${s}"`).join(', ')} external: Node would load ${specs.size > 1 ? 'them' : 'it'} natively, where slot overrides cannot apply (the registry placeholder answers the sockets there). Bundle ${name}: remove it from \`external\`, or replace \`packages: 'external'\` with an \`external\` list that does not match ${name} / ${slotPackage}.`];
 }
 
 /**

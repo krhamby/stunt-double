@@ -2,7 +2,8 @@
 // states, per mistake and per command, what it OBSERVES; nothing here knows about a particular bundler.
 import fs from 'node:fs';
 import path from 'node:path';
-import { packs, read, write, readJson, writeJson, run } from './lib.mjs';
+import { packs, read, write, run } from './lib.mjs';
+import { placeholderOnly } from './shared.mjs';
 
 const BUTTON = 'src/overrides/Button.tsx';
 const edit = (dir, rel, fn) => write(dir, rel, fn(read(dir, rel)));
@@ -67,13 +68,7 @@ export class Logo extends Component<SlotProps['Logo']> {
   { id: 'F6a', what: 'installed SDK imports a default directly (1.0.0-bad-relative)',
     apply: swapSdk('acme-core-1.0.0-bad-relative.tgz') },
   { id: 'F6b', what: 'no @acme/core-slots link: the registry placeholder (an auto-installed peer) answers the socket',
-    apply: (d, ws) => {
-      const pkg = readJson(path.join(d, 'package.json'));
-      delete pkg.dependencies['@acme/core-slots'];
-      writeJson(path.join(d, 'package.json'), pkg);
-      fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
-      ws.npm(d, 'install', '--no-save', `${packs}/acme-core-slots-0.0.1.tgz`);
-    } },
+    apply: (d, ws) => placeholderOnly(d, ws) },
   { id: 'F6g', what: 'app code imports @acme/core/original/Button (bypass)',
     apply: (d) => {
       write(d, 'src/Legacy.tsx', "import { Button } from '@acme/core/original/Button';\nexport const Legacy = () => <Button>legacy</Button>;\n");

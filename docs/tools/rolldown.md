@@ -44,6 +44,7 @@ The hooks are the same as in [Rollup](rollup.md#setup): `options` validates and 
 | F6a SDK imports a default directly (checked in the installed dist) | build | `check` | passes: the SDK default renders there (R2) |
 | F6b `@acme/core-slots` not linked (registry placeholder) | passes: the plugin is the wiring | build: `Could not resolve './STUNT-DOUBLE-NOT-WIRED …'` | build: same |
 | F6g app code imports `@acme/core/original/X` | build (import scan) | `check` | passes |
+| F6c a server build leaves the SDK or a socket external (array, regex or function, for example "every dependency") | build (`buildEnd`: `[F6] the bundle leaves … external`; nothing is written) | not checked: loud when Node starts (placeholder poison or `.jsx` shim) | same as the chain |
 | F6g a plugin resolves a socket before this one | build (`buildEnd` audit; nothing is written) | not checked | n/a |
 | F6h override deleted without regenerating | regenerated: the SDK default renders, correctly | regenerated | build: `UNRESOLVED_IMPORT` (old shim) |
 | F6h override added without regenerating | regenerated: the override renders | regenerated | passes: **the SDK default renders** (R1) |

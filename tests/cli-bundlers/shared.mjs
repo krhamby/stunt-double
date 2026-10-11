@@ -1,6 +1,7 @@
 // Expectation helpers and scripts shared by the esbuild / Rollup / Rolldown / Farm suites.
+import fs from 'node:fs';
 import path from 'node:path';
-import { run, POSITIVE } from './lib.mjs';
+import { run, packs, readJson, writeJson, POSITIVE } from './lib.mjs';
 
 /** A static (STA) or type-gate (TYP) mistake: the adapter build and the check chain both fail with `code`. */
 export const STA = (code) => ({ t1: { fail: [code] }, chain: { fail: [code] } });
@@ -45,3 +46,15 @@ w.on('event', (e) => {
   setTimeout(() => { name = steps[i][0]; steps[i][1](); }, 300);
 });
 `;
+
+/** Adapter-only project: no @acme/core-slots dependency line, the registry placeholder installed as the SDK's peer. */
+export function placeholderOnly(d, ws) {
+  const pkg = readJson(path.join(d, 'package.json'));
+  delete pkg.dependencies['@acme/core-slots'];
+  writeJson(path.join(d, 'package.json'), pkg);
+  fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
+  ws.npm(d, 'install', '--no-save', `${packs}/acme-core-slots-0.0.1.tgz`);
+}
+
+/** The [F6] line of the external-SDK guard (esbuild: "esbuild leaves", Rollup/Rolldown: "the bundle leaves"). */
+export const EXTERNAL_F6 = (what) => new RegExp(`\\[F6\\] (esbuild|the bundle) leaves ${what.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')} external: Node would load`);
