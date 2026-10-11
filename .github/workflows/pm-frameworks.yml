@@ -36,6 +36,8 @@ jobs:
         run: node --test --test-reporter=spec tests/package-managers.test.mjs
       - name: wiring self-test
         run: node --test --test-reporter=spec tests/pm-wiring.test.mjs
+      - name: init x package manager (fresh create-vite template)
+        run: node --test --test-reporter=spec tests/pm-init.test.mjs
 
   typescript-and-universal:
     name: TypeScript 7 / 5.9 matrix, unknown-tool universal tier
