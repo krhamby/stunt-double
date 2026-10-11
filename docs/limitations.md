@@ -12,7 +12,7 @@ Two things are **never** possible in any setup: every override disappearing at o
 | R2 | A third-party SDK that imports a default relatively, consumed through a bare universal-tier tool. | The SDK's `sdk-lint` publish gate; every adapter and `stunt-double check` scans the installed SDK. |
 | R3 | Dev servers and test runners do not block on contract mismatches (F1): `next dev`, Vitest, Jest, webpack/Rspack watch. The Vite overlay is asynchronous. | Production builds and CI fail. Jest can opt in with `withStuntDouble(config, { typecheck: true })`. |
 | R4 | F7 through a third-party package, or through a computed `import(expr)`. | Add the package to `scanPackages`. |
-| R5 | Parcel with `"use client"` modules can duplicate React (node targets). | Parcel has no adapter yet; `rsc: "auto"` emits no directives unless an RSC runtime is installed. |
+| R5 | Parcel 2.16, node targets: the SDK's own `"use client"` modules land in a separate chunk with a second copy of React, which crashes at render (`useContext` of null). Seen with React external and with stunt-double's shims carrying no directives. | Browser targets are unaffected (verified). For Parcel SSR, use an SDK build without directives, or another bundler for the server. |
 | R6 | An override that is type-correct but behaves wrongly, or an explicit `ignoresProps` opt-out. | Semantics are not checkable. Opt-outs live in `stunt-double.config.json`; put it under CODEOWNERS. |
 | R7 | Vite dev, universal tier, cold cache: the first load re-optimizes once. | The adapter pre-bundles every original: zero reloads. |
 
@@ -31,7 +31,7 @@ Two things are **never** possible in any setup: every override disappearing at o
 
 ## Not yet covered by an adapter
 
-Metro (React Native / Expo), Parcel, Farm and Astro have designs ([DESIGN.md §7](DESIGN.md#7-per-tool-integration)) but no adapter or suite yet, and neither have Bun's runtime and dev server (its bundler is covered). Use the universal tier there (`npx stunt-double init --universal`, then `stunt-double check && <tool>`); see R1.
+Metro (React Native / Expo), Farm and Astro have designs ([DESIGN.md §7](DESIGN.md#7-per-tool-integration)) but no adapter or suite yet, and neither have Bun's runtime and dev server (its bundler is covered). Use the universal tier there (`npx stunt-double init --universal`, then `stunt-double check && <tool>`); see R1.
 
 ## Untested
 

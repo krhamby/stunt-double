@@ -133,7 +133,7 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 | React Router 8 (framework mode) | the Vite plugin | **verified** ([page](docs/tools/react-router.md)) |
 | Remix, Astro 7 | the Vite plugin | designed |
 | Metro (React Native / Expo) | `withStuntDouble()` from `stunt-double/metro` | planned |
-| Parcel 2 | universal tier + optional `stunt-double/parcel` resolver | planned |
+| Parcel 2 | the `stunt-double/parcel` resolver, from a one-line local file | **verified** ([page](docs/tools/parcel.md)) |
 | Bun 1.4 (bundler, `Bun.build()`) | `stuntDoubleBun()` from `stunt-double/bun` | **verified** ([page](docs/tools/bun.md)) |
 | Bun 1.4 (runtime, dev server) | universal tier | designed |
 | Farm, any other bundler | universal tier: package link + `stunt-double check && <build>` | works today |
@@ -154,8 +154,8 @@ packages/stunt-double/                  the npm package: core, adapters (stunt-d
 examples/acme-core/                     fixture product SDK, @acme/core: renders its components through sockets
 examples/acme-core-slots-placeholder/   the registry placeholder, @acme/core-slots (fails on purpose when not wired)
 examples/customer-<tool>/               customer apps with the same overrides in src/overrides/: vite (+ Vitest),
-                                        esbuild, bun, webpack (+ Jest), rspack, rsbuild, next, react-router,
-                                        storybook
+                                        esbuild, bun, parcel, webpack (+ Jest), rspack, rsbuild, next,
+                                        react-router, storybook, yarn-pnp
 tests/                                  the core unit tests run from packages/; one toolchain suite per tool;
                                         the shared mistake catalogue in tests/mutations/
 docs/                                   design, decision record, error reference, SDK-author guide, tool pages
