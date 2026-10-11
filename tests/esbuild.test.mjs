@@ -113,6 +113,15 @@ try {
         assert.notEqual(r.code, 0, ws.show(r));
         assert.match(r.out, EXTERNAL_F6('"@acme/core"'), ws.show(r));
       });
+      test('no false [F6]: an entry that uses only Button leaves the unused socket re-exports out (Bun 1.4.2 lists them as external)', () => {
+        const dir = ws.project('ext-unused', (d, w) => {
+          placeholderOnly(d, w);
+          write(d, 'src/only-button.tsx', "import { Button } from '@acme/core';\nexport const X = () => <Button>x</Button>;\n");
+          write(d, 'server.mjs', serverBuild("external: ['react', 'react-dom', 'react/*', 'react-dom/*']").replace("'src/entry-server.tsx'", "'src/only-button.tsx'"));
+        });
+        const r = node(dir, 'server.mjs');
+        assert.equal(r.code, 0, ws.show(r));
+      });
       test("node build with the SOCKETS external ('@acme/core-slots/*'): the plugin's onResolve wins and the overrides render", () => {
         const dir = ws.project('ext-socket', (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', serverBuild("external: ['react', 'react-dom', 'react/*', 'react-dom/*', '@acme/core-slots/*']")); });
         const r = node(dir, 'server.mjs');
