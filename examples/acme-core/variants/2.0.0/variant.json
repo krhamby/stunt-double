@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "extends": "1.1.0",
+  "description": "MAJOR: PriceTag renamed Price (renamedFrom); new REQUIRED slot Footer; slot Badge removed (removedSlots).",
+  "lint": true,
+  "delete": ["src/original/PriceTag.tsx", "src/original/Badge.tsx"]
+}

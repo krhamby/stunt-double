@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0-nested-react",
+  "extends": null,
+  "description": "BROKEN INSTALL (F8): the SDK bundles its own copy of react (bundleDependencies), so it resolves a second React next to the app's.",
+  "lint": true,
+  "bundleReact": true
+}

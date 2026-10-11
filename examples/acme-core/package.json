@@ -1,0 +1,17 @@
+{
+  "name": "acme-core-source",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Source of the fake company SDK @acme/core (the 'lead actor'). scripts/build.mjs builds every variant with tsc emit, runs the stunt-double sdk-lint publish gate, and packs @acme/core tarballs into ../../.packs.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "react": "19.3.0",
+    "stunt-double": "0.1.0",
+    "typescript": "7.0.2"
+  }
+}

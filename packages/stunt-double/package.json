@@ -1,0 +1,94 @@
+{
+  "name": "stunt-double",
+  "version": "0.1.0",
+  "description": "Build-time, fail-closed component slots for React + TypeScript: project components replace SDK components, and every injection mistake fails the build.",
+  "license": "MIT",
+  "author": "Kevin Hamby",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/krhamby/stunt-double.git",
+    "directory": "packages/stunt-double"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12"
+  },
+  "bin": {
+    "stunt-double": "./bin/stunt-double.mjs"
+  },
+  "main": "./src/core/index.mjs",
+  "types": "./src/core/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/core/index.d.ts",
+      "default": "./src/core/index.mjs"
+    },
+    "./core": {
+      "types": "./src/core/index.d.ts",
+      "default": "./src/core/index.mjs"
+    },
+    "./vite": {
+      "types": "./src/adapters/vite.d.ts",
+      "default": "./src/adapters/vite.mjs"
+    },
+    "./rollup": {
+      "types": "./src/adapters/vite.d.ts",
+      "default": "./src/adapters/vite.mjs"
+    },
+    "./rolldown": {
+      "types": "./src/adapters/vite.d.ts",
+      "default": "./src/adapters/vite.mjs"
+    },
+    "./esbuild": {
+      "types": "./src/adapters/esbuild.d.ts",
+      "default": "./src/adapters/esbuild.mjs"
+    },
+    "./webpack": {
+      "types": "./src/adapters/webpack.d.ts",
+      "default": "./src/adapters/webpack.mjs"
+    },
+    "./next": {
+      "types": "./src/adapters/next.d.ts",
+      "default": "./src/adapters/next.mjs"
+    },
+    "./jest": {
+      "types": "./src/adapters/jest.d.ts",
+      "default": "./src/adapters/jest.mjs"
+    },
+    "./metro": {
+      "types": "./src/adapters/metro.d.ts",
+      "default": "./src/adapters/metro.mjs"
+    },
+    "./parcel": {
+      "types": "./src/adapters/parcel.d.ts",
+      "default": "./src/adapters/parcel.mjs"
+    },
+    "./bun": {
+      "types": "./src/adapters/bun.d.ts",
+      "default": "./src/adapters/bun.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "oxc-parser": "0.153.0",
+    "oxc-resolver": "11.24.2",
+    "semver": "7.8.5"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.9"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  }
+}

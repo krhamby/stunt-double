@@ -1,0 +1,9 @@
+{
+  "slots": {
+    "Button": { "kind": "client" },
+    "PriceTag": { "kind": "client" },
+    "Logo": { "kind": "client", "required": true },
+    "Badge": { "kind": "client" }
+  },
+  "removedSlots": {}
+}

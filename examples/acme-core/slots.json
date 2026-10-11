@@ -1,0 +1,9 @@
+{
+  "$comment": "Source of truth for slot-manifest.json (the defineSlots() table). The build adds version, defaults, consumers and the ABI.",
+  "slots": {
+    "Button": { "kind": "client" },
+    "PriceTag": { "kind": "client" },
+    "Logo": { "kind": "client", "required": true }
+  },
+  "removedSlots": {}
+}
