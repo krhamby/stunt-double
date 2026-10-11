@@ -105,11 +105,12 @@ export function defineSuite(t) {
     // Install the example exactly like a user would, from the .packs/ tarballs (no lockfile: the tarballs'
     // integrity changes whenever `npm run setup` re-packs them).
     execFileSync('cp', ['-a', example, base]);
-    for (const x of ['node_modules', 'dist', 'dist-ssr', 'package-lock.json', 'sdk-slots/gen', 'src/stunt-double.check.ts', '.stunt-double'])
+    for (const x of ['node_modules', 'dist', 'dist-ssr', 'build', '.stunt-double'])
       fs.rmSync(path.join(base, x), { recursive: true, force: true });
     // The copy lives outside the repo: point the relative file: specs at the repo's .packs/ tarballs.
     const pj = JSON.parse(read(base, 'package.json'));
-    for (const k of ['dependencies', 'devDependencies']) for (const [n, v] of Object.entries(pj[k] ?? {}))
+    // (overrides: the registry placeholder that the SDK's required peer resolves to; not a user step.)
+    for (const k of ['dependencies', 'devDependencies', 'overrides']) for (const [n, v] of Object.entries(pj[k] ?? {}))
       if (/^file:(\.\.\/)+\.packs\//.test(v)) pj[k][n] = `file:${path.join(packs, v.replace(/^file:(\.\.\/)+\.packs\//, ''))}`;
     write(base, 'package.json', JSON.stringify(pj, null, 2) + '\n');
     npmInstall(base);
@@ -139,8 +140,9 @@ export function defineSuite(t) {
   if (t.replace?.F6b) t.replace.F6b(h);
   else test(`${t.tool}: F6b a config without the adapter fails on the registry placeholder`, () => {
     const d = fresh();
-    fs.rmSync(path.join(d, 'node_modules/@acme/core-slots'), { recursive: true, force: true });
-    npmInstall(d, '--no-save', path.join(packs, 'acme-core-slots-0.0.1.tgz'));
+    // The SDK's required peer @acme/core-slots is the registry placeholder (as for every user); only the
+    // adapter line is removed.
+    assert.ok(fs.existsSync(path.join(d, 'node_modules/@acme/core-slots/not-wired.js')), 'the registry placeholder must be installed');
     write(d, t.configFile, read(d, t.configFile).replace("import { withStuntDouble } from 'stunt-double/webpack';", 'const withStuntDouble = (config) => config; // not wired'));
     assertFails(build(d), /Module not found[^\n]*STUNT-DOUBLE-NOT-WIRED/);
   });
