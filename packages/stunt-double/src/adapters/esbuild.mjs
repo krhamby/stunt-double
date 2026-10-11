@@ -105,7 +105,7 @@ function externalized(p, metafile) {
   const specs = new Set();
   for (const info of Object.values(metafile.inputs ?? {})) for (const i of info.imports ?? []) if (i.external && hit(i.path)) specs.add(i.path);
   if (!specs.size) return [];
-  return [`[F6] esbuild leaves ${[...specs].map((s) => `"${s}"`).join(', ')} external: Node would load ${specs.size > 1 ? 'them' : 'it'} natively, where slot overrides cannot apply (the registry placeholder answers the sockets there). Bundle ${name}: remove it from \`external\`, or replace \`packages: 'external'\` with an \`external\` list that does not match ${name} / ${slotPackage}.`];
+  return [`[F6] esbuild leaves ${[...specs].map((s) => `"${s}"`).join(', ')} external: the runtime would load ${specs.size > 1 ? 'them' : 'it'} natively, where slot overrides cannot apply (the registry placeholder answers the sockets there). Bundle ${name}: remove it from \`external\`, or replace \`packages: 'external'\` with an \`external\` list that does not match ${name} / ${slotPackage}.`];
 }
 
 /**

@@ -1,0 +1,24 @@
+name: rollup
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: rollup-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  rollup:
+    name: Rollup 4 suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup     # Node 22 + npm cache + npm ci + npm run setup
+      - run: npm test -- rollup
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollup-results
+          path: /tmp/stunt-double-tests/*/results.json
+          if-no-files-found: ignore

@@ -36,6 +36,18 @@ export default [
     expect: { outcome: 'fail', command: 'test', messages: [/\[F6\][^\n]*Vitest deps\.optimizer\.\w+ pre-bundles/] },
   },
   {
+    // build.rollupOptions.external is invisible to the configResolved guard (it inspects resolve.external /
+    // noExternal per environment); before the buildEnd check both builds exited 0 and Node then loaded the
+    // registry placeholder at startup (observed with Vite 8.3.4).
+    id: 'F6c-external',
+    title: 'build.rollupOptions.external leaves the SDK external — the runtime would load it natively',
+    family: 'vite',
+    catches: 'AUD (buildEnd: external SDK module ids)',
+    tags: ['aud'],
+    apply: (fx, suite) => addToViteConfig(fx, suite, `build: { rollupOptions: { external: ['@acme/core'] } }`),
+    expect: { outcome: 'fail', command: 'build', messages: [/\[F6\][^\n]*leaves "@acme\/core" external/] },
+  },
+  {
     // Vite puts plugin aliases before user aliases, so the adapter's socket alias wins and the user alias is
     // inert (observed with Vite 8.3). Should that ever change, the post-bundle audit must fail the build.
     id: 'F6g-alias',

@@ -2,7 +2,7 @@
 
 Rollup uses the same plugin object as Vite: `stuntDouble()` from `stunt-double/rollup` (an alias of `stunt-double/vite`). Vite-only hooks are ignored. Every injection mistake fails `rollup -c` with an `[Fx]` message.
 
-Verified with Rollup 4.64.5, @rollup/plugin-node-resolve 16.0.3, @rollup/plugin-commonjs 29.0.3, rollup-plugin-esbuild 6.2.1, TypeScript 7.0.2, React 19.3.0 and Node 22.22.0. Reference project: [`examples/customer-rollup`](../../examples/customer-rollup).
+Verified with Rollup 4.64.5, @rollup/plugin-node-resolve 16.0.3, @rollup/plugin-commonjs 29.0.3, rollup-plugin-esbuild 6.2.1, TypeScript 7.0.2, React 19.3.0 and Node 22.22.0. Reference project: [`examples/customer-rollup`](../../examples/customer-rollup). Regression suite: `npm test -- rollup` (the shared mistake catalogue, the type gate under TypeScript 7.0.2 and 5.9.3, the universal tier, plus rollup-specific tests).
 
 ## Setup
 
@@ -71,6 +71,8 @@ Options: `typecheck: false`, `audit: false`, plus every option of `stunt-double.
 `rollup -c -w`: adding `Buton.tsx` fails the next rebuild with `[F2]`, deleting it passes again; breaking and fixing a contract does the same with `[F1]`.
 
 Without the plugin, use the universal tier: run `npx stunt-double init --universal` once (it adds the `@acme/core-slots` link to `sdk-slots/`), then `"build": "stunt-double check && rollup -c"`. The check covers every row above except the bundle audit; without the check, nothing regenerates the shims (see the last column).
+
+The adapter and `check &&` columns are regression-tested by the suite; the last column was observed for every row, and the suite keeps a subset of it (the universal tier's bare build, not-wired and R1 residual cases).
 
 ## Known gaps
 

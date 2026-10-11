@@ -2,7 +2,7 @@
 
 stunt-double ships a native esbuild plugin, `stuntDoubleEsbuild()` from `stunt-double/esbuild`. It runs the same validation, contract type check and bundle audit as the Vite plugin, and every injection mistake fails `esbuild.build()` with an `[Fx]` message.
 
-Verified with esbuild 0.28.2, TypeScript 7.0.2, React 19.3.0 and Node 22.22.0. Reference project: [`examples/customer-esbuild`](../../examples/customer-esbuild).
+Verified with esbuild 0.28.2, TypeScript 7.0.2, React 19.3.0 and Node 22.22.0. Reference project: [`examples/customer-esbuild`](../../examples/customer-esbuild). Regression suite: `npm test -- esbuild` (the shared mistake catalogue, the type gate under TypeScript 7.0.2 and 5.9.3, the universal tier, plus esbuild-specific tests).
 
 ## Setup
 
@@ -84,6 +84,8 @@ await esbuild.build({ /* ... */, alias: stuntDoubleAlias() });
 | F9b `server-only` in a client slot | build | `check` | fails only because `server-only` is not installed |
 
 Watch mode and `context.rebuild()`: every rebuild regenerates and re-runs the type gate, so adding `Buton.tsx` fails the next rebuild and removing it makes the next one pass. esbuild has no browser overlay; errors print in the terminal.
+
+The adapter and `check &&` columns are regression-tested by the suite; the last column was observed for every row, and the suite keeps a subset of it (the universal tier's bare build, not-wired and R1 residual cases).
 
 ## Known gaps
 

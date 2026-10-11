@@ -1,6 +1,6 @@
-// Shared plumbing for the esbuild / Rollup / Rolldown / Farm suites: install an example once into a temp
-// dir (from the .packs/ tarballs), copy it per case, run a command, and assert exit code + [Fx] codes +
-// rendered markers. The mistakes themselves live in ./mistakes.mjs.
+// Plumbing for the tool-specific extra tests of the esbuild / Rollup / Rolldown / Farm suites (the shared
+// catalogue runs through tests/harness): install an example once into a temp dir from the .packs/ tarballs, copy
+// it per case, run a command, assert the rendered markers.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -48,29 +48,9 @@ export function workspace(exampleName) {
       assert.equal(r.code, 0, ws.show(r));
       return r;
     },
-    /**
-     * The universal tier (DESIGN §7.8) for tools without the adapter: `stunt-double init --universal` (the
-     * sdk-slots/ link package) + install + gen. The fixture's npm `overrides` entry for the registry placeholder
-     * is removed first: npm refuses an override that conflicts with the link dependency (EOVERRIDE), and the link
-     * is what satisfies the SDK's peer here.
-     */
-    installUniversal() {
-      const u = ws.project('base-universal');
-      const pkg = readJson(path.join(u, 'package.json'));
-      delete pkg.overrides;
-      writeJson(path.join(u, 'package.json'), pkg);
-      const cli = path.join(u, 'node_modules/stunt-double/bin/stunt-double.mjs');
-      for (const args of [[cli, 'init', '--universal'], null, [cli, 'gen']]) {
-        const r = args ? run(process.execPath, args, u) : run('npm', ['install', '--package-lock=false', '--no-audit', '--no-fund'], u, { timeout: 600_000 });
-        assert.equal(r.code, 0, ws.show(r));
-      }
-      assert.ok(fs.lstatSync(path.join(u, 'node_modules/@acme/core-slots')).isSymbolicLink(), 'init --universal did not link @acme/core-slots');
-      ws.universalBase = u;
-    },
     /** A copy of the installed base, optionally mutated. */
-    project(name, mutate, { universal = false } = {}) {
-      const from = universal ? ws.universalBase : base;
-      assert.ok(from, 'installUniversal() first');
+    project(name, mutate) {
+      const from = base;
       const dir = path.join(work, name);
       // Everything is copied except node_modules, which is HARDLINKED (cp -al): npm replaces files instead of
       // writing them in place, and the generator writes only under .stunt-double/, sdk-slots/ and src/. Tool caches inside
@@ -87,20 +67,15 @@ export function workspace(exampleName) {
       mutate?.(dir, ws);
       return dir;
     },
-    /** Replace a dependency and reinstall (npm keeps relative file: symlinks). */
+    /** Install another version of a dependency (an SDK variant tarball), like a user's upgrade. */
     swapDep(dir, name, spec) {
       const f = path.join(dir, 'package.json');
       const pkg = readJson(f);
-      if (spec === null) delete pkg.dependencies[name]; else pkg.dependencies[name] = spec;
+      pkg.dependencies[name] = spec;
       writeJson(f, pkg);
       fs.rmSync(path.join(dir, 'node_modules', ...name.split('/')), { recursive: true, force: true });
-      const r = run('npm', ['install', '--package-lock=false', '--no-audit', '--no-fund'], dir, { timeout: 600_000 });
+      const r = run('npm', ['install', '--no-audit', '--no-fund'], dir, { timeout: 600_000 });
       assert.equal(r.code, 0, ws.show(r));
-    },
-    npm(dir, ...args) {
-      const r = run('npm', [...args, '--package-lock=false', '--no-audit', '--no-fund'], dir, { timeout: 600_000 });
-      assert.equal(r.code, 0, ws.show(r));
-      return r;
     },
     cleanup() { if (!process.env.KEEP_WORK) fs.rmSync(work, { recursive: true, force: true }); },
   };
@@ -123,27 +98,4 @@ export function assertRender(ws, r, expect = POSITIVE) {
   assert.ok(html, `no STUNT-DOUBLE-RENDER line:\n${ws.show(r)}`);
   const errors = compareRender(summarize(html), expect);
   assert.deepEqual(errors, [], errors.join('\n'));
-}
-
-/** Every file under dir (recursively) as one string: used to prove a default is absent from the bundle. */
-export function bundleText(dir) {
-  let text = '';
-  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.(m?js|html)$/.test(e.name)) text += fs.readFileSync(f, 'utf8'); } };
-  if (fs.existsSync(dir)) walk(dir);
-  return text;
-}
-
-/**
- * Assert an observed outcome:
- *   'pass'                       exit 0
- *   { fail: ['[F1]'] }           exit != 0 and every listed code in the output
- *   { fail: /regex/ }            exit != 0 and the output matches
- */
-export function assertOutcome(ws, r, want, label) {
-  if (want === 'pass') return assert.equal(r.code, 0, `${label}: expected the command to PASS\n${ws.show(r)}`);
-  assert.notEqual(r.code, 0, `${label}: expected the command to FAIL\n${ws.show(r)}`);
-  for (const w of [].concat(want.fail)) {
-    if (w instanceof RegExp) assert.match(r.out, w, `${label}: output does not match ${w}\n${ws.show(r)}`);
-    else assert.ok(r.out.includes(w), `${label}: expected ${w} in the output\n${ws.show(r)}`);
-  }
 }

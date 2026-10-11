@@ -1,16 +1,49 @@
-// Rollup 4 suite: examples/customer-rollup built with
-//   t1     `rollup -c`  (stuntDouble() from stunt-double/rollup + @rollup/plugin-node-resolve 16)
-//   chain  `stunt-double check && <rollup without stunt-double>`
-//   bare   rollup without any stunt-double code (the link resolves the sockets)
-//
-//   npm run setup && node --test tests/rollup.test.mjs
-import { test, describe } from 'node:test';
+// Rollup 4: examples/customer-rollup built by `rollup -c` (stuntDouble() from stunt-double/rollup +
+// @rollup/plugin-node-resolve 16). The shared catalogue runs through defineToolSuite (tests/README.md); the
+// Rollup-specific behaviour (plugin order, external rules in node builds, the buildEnd audit, watch mode) follows
+// as plain node:test cases.
+import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { bundlerSuite } from './cli-bundlers/suite.mjs';
-import { run, write, probe, assertRender } from './cli-bundlers/lib.mjs';
-import { STA, DEFAULT_PRICE, F1C_RENDER, watchScript, WATCH_STEPS, chainOf, placeholderOnly, EXTERNAL_F6 } from './cli-bundlers/shared.mjs';
+import { defineToolSuite } from './harness/index.mjs';
+import { workspace, run, write, probe, assertRender } from './cli-bundlers/lib.mjs';
+import { watchScript, WATCH_STEPS, EXTERNAL_F6 } from './cli-bundlers/shared.mjs';
+
+/** rollup.config.mjs WITHOUT stunt-double: the same two bundles. */
+const PLAIN_CONFIG = `import { nodeResolve } from '@rollup/plugin-node-resolve';
+import commonjs from '@rollup/plugin-commonjs';
+import replace from '@rollup/plugin-replace';
+import esbuild from 'rollup-plugin-esbuild';
+const plugins = (browser) => [
+  nodeResolve({ browser, extensions: ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json'] }),
+  commonjs(),
+  replace({ preventAssignment: true, values: { 'process.env.NODE_ENV': JSON.stringify('production') } }),
+  esbuild({ jsx: 'automatic', target: 'es2022' }),
+];
+const onwarn = (w, warn) => { if (w.code !== 'MODULE_LEVEL_DIRECTIVE') warn(w); };
+export default [
+  { input: 'src/main.tsx', output: { dir: 'dist/assets', format: 'es' }, plugins: plugins(true), onwarn },
+  { input: 'src/entry-server.tsx', output: { dir: 'dist-ssr', format: 'es' }, external: [/^react(-dom)?(\\/|$)/], plugins: plugins(false), onwarn },
+];
+`;
+
+defineToolSuite({
+  name: 'rollup',
+  fixtureDir: 'examples/customer-rollup',
+  toolConfig: 'rollup.config.mjs',
+  commands: { build: 'rollup -c', render: 'node probes/render.mjs' },
+  outputs: ['dist', 'dist-ssr'],
+  positive: { bundle: { files: 'dist/assets/*.js' }, alsoPass: ['check'] },
+  unwired: { files: { 'rollup.unwired.config.mjs': PLAIN_CONFIG }, command: 'rollup -c rollup.unwired.config.mjs' },
+  typescript5: true,
+  universal: {
+    files: { 'rollup.universal.config.mjs': PLAIN_CONFIG },
+    build: 'stunt-double check && rollup -c rollup.universal.config.mjs',
+    bare: 'rollup -c rollup.universal.config.mjs',
+    mutations: ['F1a', 'F1b', 'F2a', 'F3a', 'F4', 'F5a', 'F6a', 'F6g', 'F7b', 'F8', 'F9c'],
+  },
+});
 
 const node = (dir, ...args) => run(process.execPath, args, dir);
 
@@ -26,97 +59,58 @@ try {
   await b.write({ dir: process.argv[2] ?? 'dist-bare', format: 'es' });
 } catch (e) { console.error('ERR', e.code ?? '', e.message); process.exit(1); }
 `;
-const BARE = script('[resolve, commonjs(), esbuild({ jsx: "automatic" })]');
+  describe('Rollup specifics', () => {
+    const ws = workspace('customer-rollup');
+    before(() => ws.install());
+    after(() => ws.cleanup());
 
-bundlerSuite({
-  name: 'Rollup 4 (customer-rollup)',
-  example: 'customer-rollup',
-  clientDir: 'dist',
-  prepareBare: (d) => write(d, 'bare.mjs', BARE),
-  probeEntry: { bare: 'dist-bare/entry-server.js', chain: 'dist-bare/entry-server.js' },
-  commands: {
-    t1: (d) => run('npx', ['rollup', '-c'], d),
-    chain: chainOf((d) => node(d, 'bare.mjs')),
-    bare: (d) => node(d, 'bare.mjs'),
-  },
-  expect: {
-    'F1a': { ...STA('[F1]'), bare: 'pass' },
-    'F1a-narrow': { ...STA('[F1]'), bare: 'pass' },
-    'F1b': { ...STA('[F1]'), bare: 'pass' },
-    // bare: nothing regenerates after the SDK upgrade (no adapter, no chain), and 1.1.0 adds a slot.
-    'F1b-upgrade': { ...STA('[F1]'), bare: { fail: /ENOENT Could not load .*sdk-slots\/gen\/Badge\.jsx/ } },
-    'F1c': { t1: 'pass', chain: 'pass', bare: 'pass', render: F1C_RENDER },
-    'F2a': { ...STA('[F2]'), bare: 'pass' },
-    'F2a-stray': { ...STA('[F2]'), bare: 'pass' },
-    'F2b': { t1: { fail: ['[F2]', '[F3]', 'RENAMED to "Price"'] }, chain: { fail: ['[F2]', '[F3]'] }, bare: { fail: /ENOENT Could not load .*sdk-slots\/gen\/(Footer|Price)\.jsx/ } },
-    'F3': { ...STA('[F3]'), bare: { fail: /UNRESOLVED_IMPORT Could not resolve "\.\.\/\.\.\/src\/overrides\/Logo\.tsx"/ } },
-    'F4': { ...STA('[F4]'), bare: 'pass' },
-    'F5': { ...STA('[F5]'), bare: { fail: /MISSING_EXPORT .*"Button" is not exported by "src\/overrides\/Button\.tsx"/ } },
-    'F6a': { ...STA('[F6]'), bare: 'pass', bareProbe: { sdk: { 'SDK_DEFAULT_BUTTON(in-cart)': 3, 'BRAND_BUTTON(dark)': 2 } } },
-    // chain: the check passes (nothing declares a link), then Rollup without the plugin hits the placeholder: loud.
-    'F6b': { t1: 'pass', chain: { fail: /STUNT-DOUBLE-NOT-WIRED/ }, bare: { fail: /STUNT-DOUBLE-NOT-WIRED/ } },
-    'F6g': { ...STA('[F6]'), bare: 'pass' },
-    'F6h': { t1: 'pass', chain: 'pass', render: DEFAULT_PRICE, bare: { fail: /UNRESOLVED_IMPORT Could not resolve "\.\.\/\.\.\/src\/overrides\/PriceTag\.tsx"/ } },
-    // bare: the shim still says "no override": the SDK default renders silently (R1); t1 / chain regenerate.
-    'F6h-add': { t1: 'pass', chain: 'pass', bare: 'pass', bareProbe: { sdk: { SDK_DEFAULT_PRICETAG: 3, BRAND_PRICE: 0 } } },
-    'F7': { ...STA('[F7]'), bare: 'pass', bareProbe: 'crash' },
-    'F7-transitive': { ...STA('[F7]'), bare: 'pass', bareProbe: 'crash' },
-    'F8': { ...STA('[F8]'), bare: 'pass' },
-    // bare: node-resolve leaves the uninstalled "server-only" external (a warning); Node then fails at import time.
-    'F9b': { ...STA('[F9]'), bare: 'pass', bareProbe: 'crash' },
-    'F9c': { ...STA('[F9]'), bare: 'pass' },
-  },
-  extra: ({ ws }) => {
-    describe('Rollup specifics', () => {
-      test('plugin order is harmless: stuntDouble() after node-resolve, with no link (placeholder installed)', () => {
-        const dir = ws.project('order', (d, w) => {
-          placeholderOnly(d, w);
-          write(d, 'last.mjs', script('[resolve, commonjs(), esbuild({ jsx: "automatic" }), stuntDouble()]', "import { stuntDouble } from 'stunt-double/rollup';"));
-        });
-        const r = node(dir, 'last.mjs', 'dist-ssr');
-        assert.equal(r.code, 0, ws.show(r));
-        assertRender(ws, probe(dir));
+    test('plugin order is harmless: stuntDouble() after node-resolve, with no link (placeholder installed)', () => {
+      const dir = ws.project('order', (d) => {
+        write(d, 'last.mjs', script('[resolve, commonjs(), esbuild({ jsx: "automatic" }), stuntDouble()]', "import { stuntDouble } from 'stunt-double/rollup';"));
       });
-
-      // Server builds with "externalize the dependencies" rules, in an adapter-only project (placeholder, no link).
-      for (const [what, external, shown] of [
-        ['a function externalizing every package.json dependency', "(id) => ['react', 'react-dom', '@acme/core', '@acme/core-slots'].some((d) => id === d || id.startsWith(d + '/'))", EXTERNAL_F6('"@acme/core"')],
-        ['[/node_modules/]', '[/node_modules/]', EXTERNAL_F6('"@acme/core"')],
-        ['a regex on the sockets', '[/^react(-dom)?(\\/|$)/, /^@acme\\/core-slots\\//]', /\[F6\] the bundle leaves "@acme\/core-slots\/(Button|Logo|PriceTag)"/],
-      ]) test(`node build with external = ${what} fails with [F6] (the SDK / sockets would load natively)`, () => {
-        const dir = ws.project(`ext-${what.replace(/\W+/g, '-').replace('node_modules', 'nm')}`, (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', script('[stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]', "import { stuntDouble } from 'stunt-double/rollup';", external)); });
-        const r = node(dir, 'server.mjs', 'dist-ssr');
-        assert.notEqual(r.code, 0, ws.show(r));
-        assert.match(r.out, shown, ws.show(r));
-        assert.ok(!fs.existsSync(path.join(dir, 'dist-ssr')), 'nothing may be written');
-      });
-      test('node build that keeps only React external renders the overrides (adapter-only project)', () => {
-        const dir = ws.project('ext-react-only', (d, w) => { placeholderOnly(d, w); write(d, 'server.mjs', script('[stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]', "import { stuntDouble } from 'stunt-double/rollup';")); });
-        const r = node(dir, 'server.mjs', 'dist-ssr');
-        assert.equal(r.code, 0, ws.show(r));
-        assertRender(ws, probe(dir));
-      });
-
-      test('audit: a plugin that resolves a socket elsewhere fails the build at buildEnd', () => {
-        const dir = ws.project('audit', (d) => write(d, 'rogue.mjs', script(
-          '[{ name: "rogue", resolveId(s, imp) { if (s === "@acme/core-slots/PriceTag") return this.resolve("@acme/core/original/PriceTag", imp, { skipSelf: true }); } }, stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]',
-          "import { stuntDouble } from 'stunt-double/rollup';")));
-        const r = node(dir, 'rogue.mjs');
-        assert.notEqual(r.code, 0, ws.show(r));
-        assert.match(r.out, /\[F6\] node_modules\/@acme\/core\/dist\/Checkout\.js imports the SDK default of slot "PriceTag"/, ws.show(r));
-        assert.ok(!fs.existsSync(path.join(dir, 'dist-bare')), 'a failed audit must not leave a bundle on disk');
-      });
-
-      test('rollup watch: every rebuild regenerates, re-runs the type gate and watches the overrides dir', () => {
-        const dir = ws.project('watch', (d) => write(d, 'watch.mjs', watchScript({
-          imports: "import { watch } from 'rollup';\nimport { stuntDouble } from 'stunt-double/rollup';\nimport { nodeResolve } from '@rollup/plugin-node-resolve';\nimport commonjs from '@rollup/plugin-commonjs';\nimport esbuild from 'rollup-plugin-esbuild';",
-          plugins: "[stuntDouble(), nodeResolve({ extensions: ['.js', '.jsx', '.tsx', '.ts'] }), commonjs(), esbuild({ jsx: 'automatic' })]",
-          extra: 'onwarn() {},',
-        })));
-        const r = run(process.execPath, ['watch.mjs'], dir, { timeout: 120_000 });
-        assert.equal(r.code, 0, ws.show(r));
-        assert.deepEqual(r.out.trim().split('\n').filter((l) => l.includes(': ')), WATCH_STEPS, ws.show(r));
-      });
+      const r = node(dir, 'last.mjs', 'dist-ssr');
+      assert.equal(r.code, 0, ws.show(r));
+      assertRender(ws, probe(dir));
     });
-  },
-});
+
+    // Server builds with "externalize the dependencies" rules, in an adapter-only project (placeholder, no link).
+    for (const [what, external, shown] of [
+      ['a function externalizing every package.json dependency', "(id) => ['react', 'react-dom', '@acme/core', '@acme/core-slots'].some((d) => id === d || id.startsWith(d + '/'))", EXTERNAL_F6('"@acme/core"')],
+      ['[/node_modules/]', '[/node_modules/]', EXTERNAL_F6('"@acme/core"')],
+      ['a regex on the sockets', '[/^react(-dom)?(\\/|$)/, /^@acme\\/core-slots\\//]', /\[F6\] the bundle leaves "@acme\/core-slots\/(Button|Logo|PriceTag)"/],
+    ]) test(`node build with external = ${what} fails with [F6] (the SDK / sockets would load natively)`, () => {
+      const dir = ws.project(`ext-${what.replace(/\W+/g, '-').replace('node_modules', 'nm')}`, (d, w) => { write(d, 'server.mjs', script('[stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]', "import { stuntDouble } from 'stunt-double/rollup';", external)); });
+      const r = node(dir, 'server.mjs', 'dist-ssr');
+      assert.notEqual(r.code, 0, ws.show(r));
+      assert.match(r.out, shown, ws.show(r));
+      assert.ok(!fs.existsSync(path.join(dir, 'dist-ssr')), 'nothing may be written');
+    });
+    test('node build that keeps only React external renders the overrides (adapter-only project)', () => {
+      const dir = ws.project('ext-react-only', (d, w) => { write(d, 'server.mjs', script('[stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]', "import { stuntDouble } from 'stunt-double/rollup';")); });
+      const r = node(dir, 'server.mjs', 'dist-ssr');
+      assert.equal(r.code, 0, ws.show(r));
+      assertRender(ws, probe(dir));
+    });
+
+    test('audit: a plugin that resolves a socket elsewhere fails the build at buildEnd', () => {
+      const dir = ws.project('audit', (d) => write(d, 'rogue.mjs', script(
+        '[{ name: "rogue", resolveId(s, imp) { if (s === "@acme/core-slots/PriceTag") return this.resolve("@acme/core/original/PriceTag", imp, { skipSelf: true }); } }, stuntDouble(), resolve, commonjs(), esbuild({ jsx: "automatic" })]',
+        "import { stuntDouble } from 'stunt-double/rollup';")));
+      const r = node(dir, 'rogue.mjs');
+      assert.notEqual(r.code, 0, ws.show(r));
+      assert.match(r.out, /\[F6\] node_modules\/@acme\/core\/dist\/Checkout\.js imports the SDK default of slot "PriceTag"/, ws.show(r));
+      assert.ok(!fs.existsSync(path.join(dir, 'dist-bare')), 'a failed audit must not leave a bundle on disk');
+    });
+
+    test('rollup watch: every rebuild regenerates, re-runs the type gate and watches the overrides dir', () => {
+      const dir = ws.project('watch', (d) => write(d, 'watch.mjs', watchScript({
+        imports: "import { watch } from 'rollup';\nimport { stuntDouble } from 'stunt-double/rollup';\nimport { nodeResolve } from '@rollup/plugin-node-resolve';\nimport commonjs from '@rollup/plugin-commonjs';\nimport esbuild from 'rollup-plugin-esbuild';",
+        plugins: "[stuntDouble(), nodeResolve({ extensions: ['.js', '.jsx', '.tsx', '.ts'] }), commonjs(), esbuild({ jsx: 'automatic' })]",
+        extra: 'onwarn() {},',
+      })));
+      const r = run(process.execPath, ['watch.mjs'], dir, { timeout: 120_000 });
+      assert.equal(r.code, 0, ws.show(r));
+      assert.deepEqual(r.out.trim().split('\n').filter((l) => l.includes(': ')), WATCH_STEPS, ws.show(r));
+    });
+  });
+

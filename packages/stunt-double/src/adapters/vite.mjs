@@ -90,6 +90,10 @@ export function stuntDouble(opts = {}) {
         },
         ssr: { noExternal: [...pk] },
         test: { server: { deps: { inline: [...pk] } } },
+        // Farm (Vite-plugin compatibility; it sets FARM_LIB_CORE_PATH): its persistent cache keeps serving the OLD
+        // shim modules after a regeneration (they are reached from node_modules). A `define` is one of Farm's
+        // cache keys, so folding the decision fingerprint in invalidates it exactly when a decision changes.
+        ...(process.env.FARM_LIB_CORE_PATH ? { define: { __STUNT_DOUBLE_FINGERPRINT__: JSON.stringify(p.fingerprint) } } : {}),
       };
     },
 
@@ -184,7 +188,7 @@ export function stuntDouble(opts = {}) {
         console.warn(`stunt-double: post-bundle audit skipped, this host has no module-graph API (${String(e?.message ?? e).split('\n')[0]})`);
         return;
       }
-      const problems = [...(viteConfigured ? [] : externalSdk(p, this)), ...auditGraph(p, graph)];
+      const problems = [...externalSdk(p, this), ...auditGraph(p, graph)];
       if (problems.length) this.error(reportError(formatProblems(p, problems)));
     },
 
@@ -234,8 +238,9 @@ export function stuntDouble(opts = {}) {
 }
 
 /**
- * Standalone Rollup / Rolldown: [F6] when `external` (an array, regex or function: a common "externalize every
- * dependency" server config) left the SDK or a socket external. Node would load the SDK natively, where no
+ * [F6] when `external` (an array, regex or function: a common "externalize every dependency" server config, or
+ * Vite's build.rollupOptions / rolldownOptions.external, which its configResolved guard cannot see) left the SDK or
+ * a socket external. Node would load the SDK natively, where no
  * override can apply. Types-only `<sdk>/contracts` may stay external.
  */
 function externalSdk(p, ctx) {
@@ -250,7 +255,7 @@ function externalSdk(p, ctx) {
     if ((info?.isExternal ?? info?.code === null) && hit(id)) ids.push(path.isAbsolute(id) ? p.rel(id) : id);
   }
   if (!ids.length) return [];
-  return [`[F6] the bundle leaves ${ids.map((s) => `"${s}"`).join(', ')} external: Node would load ${ids.length > 1 ? 'them' : 'it'} natively, where slot overrides cannot apply (the registry placeholder answers the sockets there). Bundle ${name}: make \`external\` exclude ${name} and ${slotPackage}.`];
+  return [`[F6] the bundle leaves ${ids.map((s) => `"${s}"`).join(', ')} external: the runtime would load ${ids.length > 1 ? 'them' : 'it'} natively, where slot overrides cannot apply (the registry placeholder answers the sockets there). Bundle ${name}: make \`external\` exclude ${name} and ${slotPackage}.`];
 }
 
 /** Alias-only fragment for configs that cannot take plugins (no validation: chain `stunt-double check &&`). */
