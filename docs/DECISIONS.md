@@ -177,6 +177,26 @@ The north star is about *injection* mistakes, and an SDK injects more than compo
 
 ---
 
+## 9. The adapter build-out: what the real tools decided
+
+Each adapter below was built against a real app and run through the whole shared mistake catalogue (`tests/<tool>.test.mjs`). Where the tool contradicted the original sketch, the tool won; these are the resulting decisions.
+
+| Tool | Decision | Why (observed) |
+|---|---|---|
+| Next 16 | Run the contract gate in the adapter's config function at `phase-production-build`; X1 is no longer an error | The check file moved out of `src/`, so Next's own type check never sees it. Gating at config load also fails the build before anything compiles, for Turbopack and `--webpack` alike |
+| Next 16 | One exact `./`-relative `turbopack.resolveAlias` per slot, into the root-level dot-directory `.stunt-double/gen` | Works in `next build` and `next dev` (live add / fix / remove / restore) [V]; an unknown socket falls through to the placeholder |
+| webpack / Rspack | `watchRun` purges the overrides and shim *directories* from the input file system | Purging only changed shims left a stale "file missing" stat: a fixed mistake kept failing until restart [V] |
+| webpack / Rspack / Rsbuild | `[F6]` when the SDK becomes an `ExternalModule` | SSR `externals` (webpack-node-externals, Rsbuild `output.externals`) would load the SDK natively at runtime |
+| esbuild | A native plugin; sockets resolve as external once a build already failed | esbuild's CLI cannot load plugins; esbuild otherwise piles stale-shim resolve errors onto the report |
+| Bun | A `Bun.build()` plugin with an `onEnd` audit of the metafile | Bun 1.4 writes esbuild's metafile format and a plugin can turn it on; runtime plugins still never see bare specifiers, so the runtime stays universal tier |
+| Jest | An async config; the gate is opt-in | babel-jest / @swc/jest never type-check; the build or `stunt-double check` is the gate (R3) |
+| Storybook | The Vite plugin, picked up from `vite.config.ts`; the report also goes to stderr verbatim | Storybook's logger word-wraps errors at 80 columns, splitting `[Fx]` lines |
+| Parcel | A resolver from a one-line local `parcel-resolver-*.mjs`; the plugin object is built without `@parcel/plugin`; the app root is the working directory | Parcel rejects plugin packages with other names; strict package managers would not let stunt-double reach `@parcel/plugin`; Parcel tells plugins only the monorepo root |
+| Yarn PnP | The gate's `tsc` child keeps `--require .pnp.cjs`; TypeScript 5.9 must be the project's own `typescript` | Without the hook `tsc` cannot be read from the zip cache. Yarn patches only the package named `typescript`, so the previously documented `typescript5` alias could never resolve under PnP |
+| pnpm | A `file:` dependency on a slot-package *tarball* is an install, not a universal-tier link | Generation tried to write into the `.tgz` (found by the pnpm suite) |
+
+---
+
 ## Open questions
 
 These are to be settled by the reference implementation's acceptance tests.
