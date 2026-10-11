@@ -128,7 +128,8 @@ Fewer parameters, optional extras, rest parameters, generics, class instances an
 | Jest 30 | `withStuntDouble()` from `stunt-double/jest` | **verified** ([page](docs/tools/jest.md)) |
 | Rsbuild 2, CRA 5 (craco), Gatsby | `withStuntDouble()` from `stunt-double/webpack` through their webpack/Rspack hook | designed |
 | Storybook 10 (builder-vite, or webpack via `webpackFinal`) | the Vite plugin, or `withStuntDouble()` | designed |
-| React Router 8 / Remix, Astro 7 | the Vite plugin | designed |
+| React Router 8 (framework mode) | the Vite plugin | **verified** ([page](docs/tools/react-router.md)) |
+| Remix, Astro 7 | the Vite plugin | designed |
 | Metro (React Native / Expo) | `withStuntDouble()` from `stunt-double/metro` | planned |
 | Parcel 2 | universal tier + optional `stunt-double/parcel` resolver | planned |
 | Bun 1.4 | `stuntDoubleBun()` from `stunt-double/bun`, or the universal tier | planned |
@@ -150,7 +151,7 @@ packages/stunt-double/                  the npm package: core, adapters (stunt-d
 examples/acme-core/                     fixture product SDK, @acme/core: renders its components through sockets
 examples/acme-core-slots-placeholder/   the registry placeholder, @acme/core-slots (fails on purpose when not wired)
 examples/customer-<tool>/               customer apps with the same overrides in src/overrides/: vite (+ Vitest),
-                                        esbuild, webpack (+ Jest), rspack, next
+                                        esbuild, webpack (+ Jest), rspack, next, react-router
 tests/                                  the core unit tests run from packages/; one toolchain suite per tool;
                                         the shared mistake catalogue in tests/mutations/
 docs/                                   design, decision record, error reference, SDK-author guide, tool pages
