@@ -42,10 +42,19 @@ const EXPECT_RENDER = {
 };
 
 // ---- helpers ----------------------------------------------------------------------------------------------
-const COPY_SKIP = new Set(['node_modules', 'sdk-slots', 'storybook-static']);
+/** Generated output of an example (shims, check file), taken from the core project object: never copied. */
+async function generatedPaths(example) {
+  const root = EXAMPLES[example];
+  const { generate } = await import(pathToFileURL(path.join(root, 'node_modules', 'stunt-double', 'src', 'core', 'index.mjs')).href);
+  const p = generate({ root, write: false, onError: 'return' });
+  return [p.genDir, p.checkFile].map((f) => path.relative(root, f));
+}
+const GENERATED = {};
+
 function copyProject(name, example) {
   const dir = path.join(work, name);
-  fs.cpSync(EXAMPLES[example], dir, { recursive: true, filter: (src) => !COPY_SKIP.has(path.basename(src)) && !path.basename(src).startsWith('storybook-static') && !src.endsWith('stunt-double.check.ts') });
+  const skip = new Set(['node_modules', ...GENERATED[example]].map((r) => path.join(EXAMPLES[example], r)));
+  fs.cpSync(EXAMPLES[example], dir, { recursive: true, filter: (src) => !skip.has(src) && !path.basename(src).startsWith('storybook-static') });
   return dir;
 }
 
@@ -102,9 +111,11 @@ function assertFails(res, codes, label) {
   for (const c of codes) assert.ok(flat.includes(c), `${label}: exit ${res.status} but the output does not mention ${c}\n${tail(res.output)}`);
 }
 
-before(() => {
-  for (const example of Object.values(EXAMPLES))
+before(async () => {
+  for (const [key, example] of Object.entries(EXAMPLES)) {
     assert.ok(fs.existsSync(path.join(example, 'node_modules', 'storybook')), `${path.relative(repo, example)} is not installed: npm run setup && (cd ${path.relative(repo, example)} && npm install --no-package-lock)`);
+    GENERATED[key] = await generatedPaths(key);
+  }
 });
 after(() => { if (!KEEP) fs.rmSync(work, { recursive: true, force: true }); else console.log(`kept ${work}`); });
 
