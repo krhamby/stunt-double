@@ -267,9 +267,21 @@ const swapSdk = (tgz) => (d) => { setDep(d, '@acme/core', `file:${packs}/${tgz}`
 const bareRender = (expect) => (r, dir) => { passes(r); assertRender(cmd.probe(dir, 'dist-bare/entry-server.js'), expect); };
 const bareCrash = (re) => (r, dir) => { passes(r); fails(cmd.probe(dir, 'dist-bare/entry-server.js'), re); };
 
+/** dev cell: cold start of `bun ./index.html` with the mistake present */
+const devErr = (re) => async (s) => {
+  await s.until('HTTP 500 (Bun error page)', async () => (await s.page()).status === 500);
+  await s.until(`${re} on the dev server output`, () => re.test(s.log) && /STUNT-DOUBLE-ERROR -- \[F/.test(s.log));
+};
+/** type errors never block dev: the page works, the gate prints to stderr */
+const devOk = (re, js = /BRAND_BUTTON/) => async (s) => {
+  const p = await s.until('HTTP 200', async () => { const r = await s.page(); return r.status === 200 && r.js.status === 200 && r; });
+  assert.match(p.js.body, js);
+  if (re) await s.until(`${re} on the dev server output`, () => re.test(s.log));
+};
+
 const MUTATIONS = [
   {
-    id: 'F1a', what: 'override adds a required prop (props incompatible)',
+    id: 'F1a', dev: devOk(/\[F1\] Logo/), what: 'override adds a required prop (props incompatible)',
     apply: (d) => write(d, 'src/overrides/Logo.tsx', `import type { SlotProps } from '@acme/core/contracts';
 export function Logo({ size, tone }: SlotProps['Logo'] & { tone: 'loud' }) {
   return <svg data-sd="BRAND_LOGO" data-tone={tone} width={size} />;
@@ -280,7 +292,7 @@ export function Logo({ size, tone }: SlotProps['Logo'] & { tone: 'loud' }) {
     test: OK,
   },
   {
-    id: 'F1b', what: 'override ignores contract props',
+    id: 'F1b', dev: devOk(/\[F1\] Button.*ignores these SDK props/), what: 'override ignores contract props',
     apply: (d) => write(d, 'src/overrides/Button.tsx', `import type { ReactNode } from 'react';
 import { Button as Original } from '@acme/core/original/Button';
 import { useTheme } from '../theme';
@@ -292,7 +304,7 @@ export function Button({ children }: { children?: ReactNode }) {
     bare: bareRender(POSITIVE), test: OK, // R1: onClick / variant silently dropped
   },
   {
-    id: 'F1c', what: 'must NOT fail: forwardRef / class overrides',
+    id: 'F1c', dev: devOk(), what: 'must NOT fail: forwardRef / class overrides',
     apply: (d) => write(d, 'src/overrides/Button.tsx', `import { Component, forwardRef } from 'react';
 import { Button as Original } from '@acme/core/original/Button';
 import type { SlotProps } from '@acme/core/contracts';
@@ -307,7 +319,7 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     render: POSITIVE,
   },
   {
-    id: 'F2a', what: 'typo: src/overrides/Buton.tsx',
+    id: 'F2a', dev: devErr(/\[F2\] src\/overrides\/Buton\.tsx/), what: 'typo: src/overrides/Buton.tsx',
     apply: (d) => fs.renameSync(path.join(d, 'src/overrides/Button.tsx'), path.join(d, 'src/overrides/Buton.tsx')),
     build: F(/\[F2\] src\/overrides\/Buton\.tsx overrides unknown slot "Buton" \(did you mean "Button"\?\)/), check: F(/\[F2\]/),
     // R1, observed: the CLI/runtime use the PREVIOUS shim (installed gen/Button.jsx still imports Button.tsx,
@@ -315,27 +327,27 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/Button\.tsx"/), test: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/Button\.tsx'/),
   },
   {
-    id: 'F2b', what: 'SDK upgrade 1.0.0 -> 2.0.0: PriceTag renamed Price, new required Footer',
+    id: 'F2b', dev: devErr(/RENAMED to "Price"/), what: 'SDK upgrade 1.0.0 -> 2.0.0: PriceTag renamed Price, new required Footer',
     apply: swapSdk('acme-core-2.0.0.tgz'),
     build: F(/\[F2\] src\/overrides\/PriceTag\.tsx: slot "PriceTag" was RENAMED to "Price"/), check: F(/RENAMED to "Price"/),
     // RES: the 2.0.0 SDK imports the new socket @acme/core-slots/Price, which the stale gen/ lacks
     bare: F(/Could not resolve: "@acme\/core-slots\/Price"/), test: F(/Cannot find module '@acme\/core-slots\/Price'/),
   },
   {
-    id: 'F3', what: 'required slot Logo not provided',
+    id: 'F3', dev: devErr(/\[F3\]/), what: 'required slot Logo not provided',
     apply: (d) => fs.rmSync(path.join(d, 'src/overrides/Logo.tsx')),
     build: F(/\[F3\] required slot "Logo" has no implementation/), check: F(/\[F3\]/),
     // RES: the previous shim imports the deleted file (after a fresh `gen`, the Logo shim is missing): loud
     bare: F(/Could not resolve: "\.\.\/\.\.\/src\/overrides\/Logo\.tsx"/), test: F(/Cannot find module '\.\.\/\.\.\/src\/overrides\/Logo\.tsx'/),
   },
   {
-    id: 'F4', what: 'two claims: Button.tsx + Button/index.tsx',
+    id: 'F4', dev: devErr(/\[F4\]/), what: 'two claims: Button.tsx + Button/index.tsx',
     apply: (d) => write(d, 'src/overrides/Button/index.tsx', `export { Button } from '../Button';\n`),
     build: F(/\[F4\] slot "Button" is claimed by 2 files/), check: F(/\[F4\]/),
     bare: bareRender(POSITIVE), test: OK, // R1: the previous shim (Button.tsx) keeps rendering
   },
   {
-    id: 'F5', what: 'wrong export: default instead of named Button',
+    id: 'F5', dev: devErr(/\[F5\]/), what: 'wrong export: default instead of named Button',
     apply: (d) => {
       const f = path.join(d, 'src/overrides/Button.tsx');
       fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('export function Button(', 'export default function Button('));
@@ -347,7 +359,7 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     bare: bareCrash(/ReferenceError: Button\d* is not defined/), test: F(/SyntaxError: export 'Button' not found in '\.\.\/\.\.\/src\/overrides\/Button\.tsx'/),
   },
   {
-    id: 'F6a', what: 'SDK file imports a slot default relatively (1.0.0-bad-relative)',
+    id: 'F6a', dev: devErr(/\[F6\] node_modules\/.*Checkout\.js/), what: 'SDK file imports a slot default relatively (1.0.0-bad-relative)',
     apply: swapSdk('acme-core-1.0.0-bad-relative.tgz'),
     build: F(/\[F6\] node_modules\/.*Checkout\.js imports the default of slot "Button" directly/), check: F(/\[F6\]/),
     // R2: silent SDK default inside Checkout
@@ -355,13 +367,13 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     test: F(/toHaveLength/), // only the example's own marker-count assertion notices
   },
   {
-    id: 'F6b', what: 'unwired: the registry placeholder instead of the link',
+    id: 'F6b', dev: devErr(/registry placeholder/), what: 'unwired: the registry placeholder instead of the link',
     apply: (d) => { const pkg = readJson(path.join(d, 'package.json')); delete pkg.workspaces; pkg.dependencies['@acme/core-slots'] = `file:${packs}/acme-core-slots-0.0.1.tgz`; writeJson(path.join(d, 'package.json'), pkg); bunInstall(d); write(d, 'tsconfig.json', fs.readFileSync(path.join(d, 'tsconfig.json'), 'utf8').replace(/^\s*"paths".*$/m, '')); },
     build: F(/\[F6\] @acme\/core resolves @acme\/core-slots to .*registry placeholder/), check: F(/registry placeholder/),
     bare: F(/STUNT-DOUBLE-NOT-WIRED/), test: F(/STUNT-DOUBLE-NOT-WIRED/),
   },
   {
-    id: 'F6f', what: 'link wired wrong: Bun "file:./sdk-slots" (a copy)',
+    id: 'F6f', dev: devErr(/\(a copy/), what: 'link wired wrong: Bun "file:./sdk-slots" (a copy)',
     apply: (d) => {
       const pkg = readJson(path.join(d, 'package.json'));
       delete pkg.workspaces;
@@ -375,7 +387,7 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
     bare: bareRender(POSITIVE), test: OK,
   },
   {
-    id: 'F6g', what: 'bypass: app code imports @acme/core/original/Button',
+    id: 'F6g', dev: devErr(/\[F6\] src\/App\.tsx/), what: 'bypass: app code imports @acme/core/original/Button',
     apply: (d) => {
       const f = path.join(d, 'src/App.tsx');
       fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace("import { Button, Checkout } from '@acme/core';", "import { Checkout } from '@acme/core';\nimport { Button } from '@acme/core/original/Button';"));
@@ -398,7 +410,7 @@ const hijack = { name: 'hijack', setup(b: any) { b.onResolve({ filter: /^@acme\\
     check: OK, bare: null, test: null, // only a build-script plugin can do this
   },
   {
-    id: 'F7', what: 'override imports its own slot through the barrel',
+    id: 'F7', dev: devErr(/\[F7\]/), what: 'override imports its own slot through the barrel',
     apply: (d) => write(d, 'src/overrides/PriceTag.tsx', `import { PriceTag as Base } from '@acme/core';
 import type { SlotProps } from '@acme/core/contracts';
 export function PriceTag(props: SlotProps['PriceTag']) {
@@ -410,14 +422,14 @@ export function PriceTag(props: SlotProps['PriceTag']) {
     bare: bareCrash(/heap out of memory|Maximum call stack/), test: F(/RangeError: Maximum call stack size exceeded/),
   },
   {
-    id: 'F8', what: 'duplicate React: the SDK bundles its own copy (1.0.0-nested-react)',
+    id: 'F8', dev: devErr(/\[F8\]/), what: 'duplicate React: the SDK bundles its own copy (1.0.0-nested-react)',
     apply: swapSdk('acme-core-1.0.0-nested-react.tgz'),
     build: F(/\[F8\] "react"/), check: F(/\[F8\]/),
     // runtime: two Reacts in one bundle / process (R1)
     bare: bareCrash(/Invalid hook call/), test: F(/dispatcher\.useContext/),
   },
   {
-    id: 'F9b', what: 'client-slot override imports "server-only"',
+    id: 'F9b', dev: devErr(/\[F9\]/), what: 'client-slot override imports "server-only"',
     apply: (d) => {
       // the real server-only@0.0.1 shape: throws unless resolved with the "react-server" condition
       write(d, 'node_modules/server-only/package.json', '{"name":"server-only","version":"0.0.1","main":"index.js","exports":{".":{"react-server":"./empty.js","default":"./index.js"}}}');
@@ -430,7 +442,7 @@ export function PriceTag(props: SlotProps['PriceTag']) {
     bare: bareCrash(/cannot be imported from a Client Component/), test: F(/cannot be imported from a Client Component/),
   },
   {
-    id: 'F9c', what: 'async (server-shaped) override in a client slot',
+    id: 'F9c', dev: devOk(/\[F9\]/), what: 'async (server-shaped) override in a client slot',
     apply: (d) => write(d, 'src/overrides/Logo.tsx', `import type { SlotProps } from '@acme/core/contracts';
 export async function Logo({ size = 32 }: SlotProps['Logo']) {
   await Promise.resolve();
@@ -441,7 +453,7 @@ export async function Logo({ size = 32 }: SlotProps['Logo']) {
     bare: bareCrash(/A component suspended while responding to synchronous input/), test: F(/A component suspended/),
   },
   {
-    id: 'F6h', what: 'stale shims: override removed without regenerating',
+    id: 'F6h', dev: devOk(null, /SDK_DEFAULT_PRICETAG/), what: 'stale shims: override removed without regenerating',
     apply: (d) => fs.rmSync(path.join(d, 'src/overrides/PriceTag.tsx')),
     // T1 regenerates at every Bun.build: the SDK default now renders, as declared
     build: (r, dir) => { passes(r); assertRender(cmd.probe(dir), { sdk: { SDK_DEFAULT_PRICETAG: 3, BRAND_PRICE: 0 } }); },
@@ -457,6 +469,10 @@ describe('mutations (Bun 1.4)', () => {
     describe(`${m.id}: ${m.what}`, () => {
       let dir;
       before(() => { dir = project(`m-${m.id}`, m.apply); });
+      if (m.dev) test('dev', async () => {
+        const s = devServer(project(`m-${m.id}-dev`, m.apply));
+        try { await m.dev(s); } finally { s.stop(); }
+      });
       for (const cell of ['build', 'check', 'bare', 'test']) {
         if (!m[cell]) continue;
         test(cell, () => {
