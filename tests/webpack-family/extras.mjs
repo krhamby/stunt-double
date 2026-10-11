@@ -30,6 +30,10 @@ export function unwiredConfig(fixtureDir, configFile) {
  * @param {string} t.toolPackage  'webpack' | '@rspack/core'
  * @param {string} [t.ssrMarker]  the line of the SSR config to put externals after (default "    target: 'node',\n")
  * @param {string} [t.ssrBundle]  the built SSR file (default 'dist-ssr/entry-server.mjs')
+ * @param {(value: string) => string} [t.externalsLine]  config text inserted after ssrMarker that sets the server
+ *                               build's externals to `value` (default: externalsPresets node + externals)
+ * @param {(toolConfig: string) => { file: string, text: string }} [t.auditConfig]  a config file that extends the
+ *                               tool config with the redirecting plugin (default: a webpack/Rspack config function)
  */
 export function webpackFamilyMutations(t) {
   const marker = t.ssrMarker ?? "    target: 'node',\n";
@@ -38,7 +42,7 @@ export function webpackFamilyMutations(t) {
     assert.ok(s.includes(marker), `${suite.toolConfig}: no SSR config (${JSON.stringify(marker)}) to add externals to`);
     return s
       .replace(ADAPTER_IMPORT, (m) => `import nodeExternals from 'webpack-node-externals';\n${m}`)
-      .replace(marker, `${marker}    externalsPresets: { node: true },\n    externals: ${value},\n`);
+      .replace(marker, `${marker}${(t.externalsLine ?? ((v) => `    externalsPresets: { node: true },\n    externals: ${v},\n`))(value)}`);
   });
   const lib = t.toolPackage === 'webpack' ? "(await import('webpack')).default" : "(await import('@rspack/core')).rspack";
   return [
@@ -66,7 +70,7 @@ export function webpackFamilyMutations(t) {
       family: 'webpack',
       catches: 'AUD (socket consumers without the shim)',
       tags: ['aud'],
-      apply: (fx, suite) => fx.write('audit.config.mjs', `import base from './${suite.toolConfig}';
+      apply: (fx, suite) => (t.auditConfig ? fx.write(t.auditConfig(suite.toolConfig).file, t.auditConfig(suite.toolConfig).text) : fx.write('audit.config.mjs', `import base from './${suite.toolConfig}';
 const lib = ${lib};
 const all = (cfg) => (Array.isArray(cfg) ? cfg : [cfg]);
 // A user plugin that "helpfully" resolves the PriceTag socket itself.
@@ -74,8 +78,8 @@ export default async (env, argv) => all(await (typeof base === 'function' ? base
   c.plugins.unshift(new lib.NormalModuleReplacementPlugin(/^@acme\\/core-slots\\/PriceTag$/, '@acme/core/original/PriceTag'));
   return c;
 });
-`),
-      expect: { outcome: 'fail', run: `${t.build} --config audit.config.mjs`, messages: [/\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but [^\n]*PriceTag\.jsx is not in the bundle/] },
+`)),
+      expect: { outcome: 'fail', run: `${t.build} --config ${t.auditConfig ? t.auditConfig('').file : 'audit.config.mjs'}`, messages: [/\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but [^\n]*PriceTag\.jsx is not in the bundle/] },
     },
     {
       id: 'F6e-remove',

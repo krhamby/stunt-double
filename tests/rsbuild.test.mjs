@@ -1,76 +1,43 @@
-// Rsbuild 2 (web + node environments): examples/customer-rsbuild, stunt-double/webpack through
-// `tools: { rspack: (c) => withStuntDouble(c) }`. Runs the positive scenario, the shared catalogue, the
-// Rsbuild-specific scenarios below, a live dev-server probe in Chromium, the TypeScript 5.9 type gate and the
-// universal tier. See tests/README.md and docs/tools/rsbuild.md.
+// Rsbuild 2 (web + node environments): examples/customer-rsbuild with stunt-double/webpack through
+// `tools: { rspack: (c) => withStuntDouble(c) }`. Runs the positive scenario, the shared mutation catalogue, the
+// webpack-family scenarios (tests/webpack-family/extras.mjs), the Rsbuild-specific scenarios below, a live
+// dev-server probe in Chromium, the type gate under TypeScript 5.9 and the universal tier. See tests/README.md and
+// docs/tools/rsbuild.md.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { defineToolSuite } from './harness/index.mjs';
-import { browserDevProbe } from './harness/browser-dev.mjs';
+import { unwiredConfig, webpackFamilyMutations, webpackDevProbe } from './webpack-family/extras.mjs';
 
-const BUILD = 'rsbuild build';
-const WIRED = 'tools: { rspack: (config) => withStuntDouble(config) },';
+const fixtureDir = 'examples/customer-rsbuild';
+const build = 'rsbuild build';
+const NO_ADAPTER = unwiredConfig(fixtureDir, 'rsbuild.config.ts');
 
-// The same app built by Rsbuild WITHOUT the adapter: what a second, forgotten config looks like.
-const UNWIRED_CONFIG = `import { defineConfig } from '@rsbuild/core';
-import { pluginReact } from '@rsbuild/plugin-react';
+// Rsbuild sets server externals with output.externals inside the node environment, and extends a config with
+// mergeRsbuildConfig (tools.rspack functions of both run in order: withStuntDouble first, then the user plugin).
+const family = webpackFamilyMutations({
+  build,
+  toolPackage: '@rspack/core',
+  ssrMarker: "        target: 'node',\n",
+  externalsLine: (v) => `        externals: ${v},\n`,
+  auditConfig: (toolConfig) => ({
+    file: 'audit.config.ts',
+    text: `import { mergeRsbuildConfig } from '@rsbuild/core';
+import base from './${toolConfig.replace(/\.ts$/, '')}';
 
-// A second Rsbuild config that never got withStuntDouble (e.g. a docs site or a one-off build).
-export default defineConfig({
-  plugins: [pluginReact()],
-  source: { entry: { index: './src/main.tsx' } },
+// A user plugin that "helpfully" resolves the PriceTag socket itself.
+export default mergeRsbuildConfig(base, {
+  tools: { rspack: (config, { rspack }) => { config.plugins!.unshift(new rspack.NormalModuleReplacementPlugin(/^@acme\\/core-slots\\/PriceTag$/, '@acme/core/original/PriceTag')); } },
 });
-`;
-
-// Universal tier: no adapter, the socket resolves through the package link.
-const UNIVERSAL_CONFIG = `import { defineConfig } from '@rsbuild/core';
-import { pluginReact } from '@rsbuild/plugin-react';
-
-export default defineConfig({
-  plugins: [pluginReact()],
-  environments: {
-    web: { source: { entry: { index: './src/main.tsx' } } },
-    node: {
-      source: { entry: { 'entry-server': './src/entry-server.tsx' } },
-      output: { target: 'node', module: true, distPath: { root: 'dist-ssr', js: '' }, filename: { js: '[name].mjs' }, filenameHash: false, minify: false },
-    },
-  },
+`,
+  }),
 });
-`;
-const UNIVERSAL_BUILD = 'rsbuild build -c rsbuild.universal.config.ts';
 
-const DEFAULT_PRICETAG = { sdk: { SDK_DEFAULT_PRICETAG: 3, BRAND_PRICE: 0, BRAND_LOGO: 1 } };
-
-/** Rsbuild-specific scenarios (appended to the shared catalogue). */
+/** Rsbuild-specific scenarios: claims docs/tools/rsbuild.md makes about Rsbuild's own options. */
 const RSBUILD = [
   {
-    id: 'RSB-F6e',
-    title: 'warm Rspack persistent cache (performance.buildCache): removing an override is never served from the cache',
-    catches: 'fingerprint in cache.version + shim content',
-    tags: ['cache', 'must-pass'],
-    apply: async (fx) => {
-      const warm = await fx.run(BUILD);
-      assert.equal(warm.code, 0, `warm-up build failed\n${warm.output.slice(-3000)}`);
-      fx.remove(fx.override('PriceTag.tsx'));
-    },
-    expect: { outcome: 'pass', command: 'build', render: DEFAULT_PRICETAG },
-  },
-  {
-    id: 'RSB-F6e-readd',
-    title: 'warm cache built WITHOUT the PriceTag override: adding it back renders the override',
-    catches: 'fingerprint in cache.version + shim content',
-    tags: ['cache', 'must-pass'],
-    apply: async (fx) => {
-      fx.remove(fx.override('PriceTag.tsx'));
-      const warm = await fx.run(BUILD);
-      assert.equal(warm.code, 0, `warm-up build failed\n${warm.output.slice(-3000)}`);
-      fx.restore(fx.override('PriceTag.tsx'));
-    },
-    expect: { outcome: 'pass', command: 'build', render: { sdk: { BRAND_PRICE: 3, SDK_DEFAULT_PRICETAG: 0 } } },
-  },
-  {
     id: 'RSB-cache-version',
-    title: 'performance.buildCache: the stunt-double fingerprint is folded into both environments\' Rspack cache version',
+    title: "performance.buildCache: the stunt-double fingerprint is folded into both environments' Rspack cache version",
     catches: 'CFG (withStuntDouble)',
     tags: ['cache'],
     apply: () => {},
@@ -78,14 +45,6 @@ const RSBUILD = [
       outcome: 'pass',
       run: `NODE_ENV=production rsbuild inspect >/dev/null && grep -q "version: 'web-production|stunt-double:[0-9a-f]*'" .rsbuild/rspack.config.web.mjs && grep -q "version: 'node-production|stunt-double:[0-9a-f]*'" .rsbuild/rspack.config.node.mjs`,
     },
-  },
-  {
-    id: 'RSB-audit',
-    title: 'a plugin in tools.rspack resolves the PriceTag socket to the SDK default: the bundle audit fails the build',
-    catches: 'AUD',
-    tags: ['aud'],
-    apply: (fx) => fx.edit('rsbuild.config.ts', (s) => s.replace(WIRED, "tools: { rspack: [(config) => withStuntDouble(config), (config, { rspack }) => { config.plugins!.unshift(new rspack.NormalModuleReplacementPlugin(/^@acme\\/core-slots\\/PriceTag$/, '@acme/core/original/PriceTag')); }] },")),
-    expect: { outcome: 'fail', command: 'build', messages: [/\[F6\] @acme\/core imports @acme\/core-slots\/PriceTag but [^\n]*PriceTag\.jsx is not in the bundle/] },
   },
   {
     id: 'RSB-F8-dedupe',
@@ -152,35 +111,34 @@ export default mergeRsbuildConfig(base, { tools: { rspack: (config: any) => {
   }
 }
 
-const browser = browserDevProbe({ command: 'rsbuild dev --port {port}', overlay: 'rsbuild-error-overlay' });
+const browser = webpackDevProbe({ dev: 'rsbuild dev', overlay: 'rsbuild-error-overlay' });
 
 defineToolSuite({
   name: 'rsbuild',
-  fixtureDir: 'examples/customer-rsbuild',
+  family: 'webpack',
+  fixtureDir,
   toolConfig: 'rsbuild.config.ts',
   commands: {
-    build: BUILD,
+    build,
     render: 'node probes/render.mjs dist-ssr/entry-server.mjs',
   },
   outputs: ['dist', 'dist-ssr'],
-  positive: {
-    bundle: { files: 'dist/static/js/*.js' },
-    alsoPass: ['check'],
-  },
+  positive: { bundle: { files: 'dist/static/js/*.js' }, alsoPass: ['check'] },
   unwired: {
-    files: { 'rsbuild.unwired.config.ts': UNWIRED_CONFIG },
-    command: 'rsbuild build -c rsbuild.unwired.config.ts',
+    files: { 'rsbuild.unwired.config.ts': NO_ADAPTER },
+    command: `${build} --config rsbuild.unwired.config.ts`,
   },
-  mutations: (list) => [...list, ...RSBUILD],
+  addDevDependencies: { 'webpack-node-externals': '3.0.0' },
+  mutations: (list) => [...list, ...family, ...RSBUILD],
   devProbe: async (fx, t, suite) => {
     await browser(fx, t, suite);
     await bothEnvironmentsInFirstRebuild(fx, t);
   },
   typescript5: true,
   universal: {
-    files: { 'rsbuild.universal.config.ts': UNIVERSAL_CONFIG },
-    build: `stunt-double check && ${UNIVERSAL_BUILD}`,
-    bare: UNIVERSAL_BUILD,
+    files: { 'rsbuild.universal.config.ts': NO_ADAPTER },
+    build: `stunt-double check && ${build} --config rsbuild.universal.config.ts`,
+    bare: `${build} --config rsbuild.universal.config.ts`,
     mutations: ['F1a', 'F2a', 'F3a', 'F5a', 'F7b'],
   },
 });
