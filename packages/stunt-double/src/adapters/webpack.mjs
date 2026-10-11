@@ -44,6 +44,9 @@ function withOne(config, opts) {
   const { typecheck = true, audit = true, mode: _mode, ...genOpts } = opts;
   const root = path.resolve(opts.root ?? config.context ?? process.cwd());
   const p = generate({ ...genOpts, root, onError: 'return' });
+  // A bailing run (CRA's production config sets bail: true) aborts at the first module error, typically the
+  // previous shim of a renamed override, so the [Fx] problems would never be printed. Report them instead.
+  if (p.problems.length && config.bail) config.bail = false;
 
   if (p.sdk) {
     config.resolve ??= {};
@@ -115,11 +118,16 @@ export class StuntDoublePlugin {
       const changed = [...new Set([...this.p.changedFiles, ...shimChanges(this.p, this.seen)])];
       if (changed.length) invalidate(c, changed);
       if (changed.length || this.p.problems.join() !== prev.problems.join() || touches(this.p, c)) gateDirty = true;
+      announceRemovals(c, this.p.overridesDir);
     });
 
     compiler.hooks.thisCompilation.tap(NAME, (compilation) => {
       const p = this.p;
-      const report = (message) => { compilation.errors.push(makeError(message)); };
+      const ours = new Set();
+      const report = (message) => { const e = makeError(message); ours.add(e); compilation.errors.push(e); };
+      // webpack sorts module-less errors after every module error, and CRA prints only the first error: put the
+      // [Fx] errors first, they explain the module errors that follow (e.g. a stale shim's "Module not found").
+      compilation.hooks.processErrors?.tap(NAME, (errors) => [...errors.filter((e) => ours.has(e)), ...errors.filter((e) => !ours.has(e))]);
       if (p.problems.length) report(formatProblems(p));
       if (p.warnings.length && !this.warned) { this.warned = true; compilation.warnings.push(makeError(formatWarnings(p))); }
       compilation.contextDependencies.add(p.overridesDir);
@@ -169,6 +177,20 @@ function touches(p, compiler) {
   const files = [...(compiler.modifiedFiles ?? []), ...(compiler.removedFiles ?? [])];
   if (!compiler.modifiedFiles) return true;
   return files.some((f) => f === p.checkFile || p.closureFiles.has(f) || isInside(f, p.overridesDir) || isInside(f, p.genDir));
+}
+
+/**
+ * Inside a watched context directory (the overrides dir) watchpack reports a deleted file as 'remove' followed
+ * by 'change' with no mtime. fork-ts-checker 6 (CRA's dev type checker) ignores the mtime and records a change,
+ * so TypeScript never sees the delete and, once the file is back, keeps a stale TS2307 for it (e.g. in
+ * src/stunt-double.check.ts after a rename and its fix). Re-announce real removals; only 'remove' listeners
+ * see this (webpack and webpack-dev-server listen for 'change').
+ */
+function announceRemovals(compiler, dir) {
+  const watcher = compiler.watchFileSystem?.watcher ?? compiler.watchFileSystem?.wfs?.watcher;
+  if (typeof watcher?.emit !== 'function') return;
+  for (const f of new Set([...(compiler.modifiedFiles ?? []), ...(compiler.removedFiles ?? [])]))
+    if (isInside(f, dir) && !fs.existsSync(f)) watcher.emit('remove', f, 'rename');
 }
 
 /**
