@@ -109,6 +109,10 @@ before(() => {
   fs.cpSync(base, baseU, { recursive: true, verbatimSymlinks: true });
   const init = run(process.execPath, [sdCli(baseU), 'init', '--universal'], baseU);
   assert.equal(init.code, 0, show(init));
+  // a link project needs no placeholder override (and npm rejects one next to a link: EOVERRIDE)
+  const pu = readJson(path.join(baseU, 'package.json'));
+  delete pu.overrides;
+  writeJson(path.join(baseU, 'package.json'), pu);
   const ru = bunInstall(baseU);
   assert.equal(ru.code, 0, `bun install (universal) failed\n${show(ru)}`);
   // init + install leave sdk-slots/gen/ empty; the first `stunt-double check &&` (or gen) fills it
@@ -141,6 +145,7 @@ describe('positive: customer-bun', { skip: !selected('positive') }, () => {
     const pkg = readJson(path.join(baseU, 'package.json'));
     assert.equal(pkg.dependencies['@acme/core-slots'], 'workspace:*');
     assert.deepEqual(pkg.workspaces, ['sdk-slots']);
+    assert.equal(pkg.overrides, undefined);
     const seen = fs.realpathSync(path.join(fs.realpathSync(path.join(baseU, 'node_modules/@acme/core')), '..', 'core-slots'));
     assert.equal(seen, fs.realpathSync(path.join(baseU, 'sdk-slots')));
     passes(cmd.check(project('universal-check', null, { universal: true })));
@@ -467,6 +472,7 @@ export const Button = forwardRef<HTMLButtonElement, Omit<SlotProps['Button'], 'r
       const pkg = readJson(path.join(d, 'package.json'));
       delete pkg.workspaces;
       pkg.dependencies['@acme/core-slots'] = 'file:./sdk-slots';
+      pkg.overrides = { '@acme/core-slots': `file:${packs}/acme-core-slots-0.0.1.tgz` }; // the registry stand-in
       writeJson(path.join(d, 'package.json'), pkg);
       bunInstall(d);
       // observed: Bun resolves the SDK's @acme/core-slots peer from the registry (here: the fixture's
